@@ -47,9 +47,7 @@ def apply_torch_fwd_hooks(
     parse_fn: Optional[Callable] = None,
 ) -> Dict[str, Tensor]:
     """Retrieve activation using vanilla pytorch forward hooks."""
-    module_dict = {
-        name: shape for name, shape in zip(module_names, shapes)
-    }
+    module_dict = {name: shape for name, shape in zip(module_names, shapes)}
 
     def _fwd_hook(
         registered_name: str,
@@ -147,13 +145,19 @@ def test_simple_model():
     # Vanilla pytorch forward hooks
     logger.info("Running base forward hooks")
     test_base_dict = apply_torch_fwd_hooks(
-        model, inputs, module_names, module_shapes,
+        model,
+        inputs,
+        module_names,
+        module_shapes,
     )
-    
+
     # Flex model forward hooks
     logger.info("Running flex model forward hooks")
     test_flex_dict = apply_flex_model_fwd_hooks(
-        model, inputs, module_names, module_shapes,
+        model,
+        inputs,
+        module_names,
+        module_shapes,
     )
 
     # Shape dumped is different, reshape back for comparison
@@ -161,7 +165,7 @@ def test_simple_model():
 
     # Correctness check
     assert compare_tensor_dicts(test_base_dict, test_flex_dict)
-    
+
 
 def test_huggingface_opt_model():
     model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
@@ -187,8 +191,7 @@ def test_huggingface_opt_model():
         "model",
         "model.decoder",
         "model.decoder.layers",
-        "model.decoder.layers.7"
-        "model.decoder.layers.11.fc2",
+        "model.decoder.layers.7" "model.decoder.layers.11.fc2",
         "lm_head",
     ]
     module_shapes = [None for n in range(len(module_names))]
@@ -215,7 +218,10 @@ def test_huggingface_opt_model():
 
     logger.info("Running flex model forward hooks")
     test_flex_dict = apply_flex_model_fwd_hooks(
-        model, inputs.input_ids, module_names, module_shapes,
+        model,
+        inputs.input_ids,
+        module_names,
+        module_shapes,
     )
 
     assert compare_tensor_dicts(test_base_dict, test_flex_dict)
@@ -223,6 +229,7 @@ def test_huggingface_opt_model():
 
 def test_traversal_utils():
     from utils import _recursively_find_first_tensor
+
     target_tensor = torch.randn(2, 2)
     outputs = (
         (1, 3),
@@ -236,9 +243,14 @@ def test_traversal_utils():
     assert torch.equal(tensor, target_tensor)
 
     from utils import _flatten, _unflatten
+
     # TODO: More test cases here
     outputs = [
-        1, 2, (torch.randn(2, 2), 3), "ab", (2, torch.randn(3, 3)),
+        1,
+        2,
+        (torch.randn(2, 2), 3),
+        "ab",
+        (2, torch.randn(3, 3)),
     ]
     treedef, leaves = _flatten(outputs)
 

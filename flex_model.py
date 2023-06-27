@@ -4,7 +4,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import logging
 from typing import (
-    List, Any, Dict, Optional, Callable, Tuple, Generator, Union,
+    List,
+    Any,
+    Dict,
+    Optional,
+    Callable,
+    Tuple,
+    Generator,
+    Union,
 )
 from functools import partial
 
@@ -40,6 +47,7 @@ class _HookFunction:
     will be exposed to the FlexModel and subsequently installed as a
     hook.
     """
+
     def __init__(
         self,
         hook_function_triple: HookFunctionTriple,
@@ -104,8 +112,6 @@ class _HookFunction:
     ) -> None:
         self._output_ptr[self._module_name] = activation.detach().cpu()
 
-    
-
     def gen_hook_function(self):
         """Returns the hook function to be passed to PyTorch.
 
@@ -126,7 +132,7 @@ def _hook_function(
 
     # Parse layer outputs
     tensor, repack_fn = func._parse(outputs)
-    
+
     # Rearrange
     logger.info(f"Module {func._module_name} - initial shape: {tensor.shape}")
     tensor, undo_rearrange_fn = func._rearrange(tensor)
@@ -160,6 +166,7 @@ class FlexModel(nn.Module):
 
     NOTE: See `torch.distributed.fsdp` for pytorch model wrapper example.
     """
+
     def __init__(
         self,
         module: nn.Module,
