@@ -45,10 +45,10 @@ def get_leaf_node(leaf_obj: LeafObject) -> LeafNode:
     return _LEAF_NODE_TYPE_REGISTRY[type(leaf_obj)]
 
 
+# TODO: Deprecate in favour of _flatten
 def _recursively_find_first_tensor(
     obj: Union[InternalObject, LeafObject, ScalarObject]
 ) -> Optional[Tensor]:
-    # TODO: Deprecate
     if is_leaf_obj(obj):
         return obj
 

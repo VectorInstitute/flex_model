@@ -15,6 +15,9 @@ from utils import _recursively_find_first_tensor
 logger = logging.getLogger(__name__)
 
 
+# TODO: Break tests into smaller bite-sized chunks and prepare for pytest
+
+
 class Model(nn.Module):
     def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
@@ -167,6 +170,7 @@ def test_simple_model():
     assert compare_tensor_dicts(test_base_dict, test_flex_dict)
 
 
+# TODO: More model test cases and editing functions
 def test_huggingface_opt_model():
     model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
     tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")

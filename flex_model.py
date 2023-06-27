@@ -32,6 +32,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# TODO:
+#   1. Larger test coverage
+#   2. Test with different huggingface models
+#   3. Implement multi-gpu single-node functionality (decouple)
+#   4. Implement multi-gpu multi-node functionality
+
+
 @dataclass
 class HookFunctionTriple:
     module_name: str
