@@ -20,8 +20,15 @@ import torch.nn as nn
 from torch import Tensor
 
 
-from hook_functions import HookFunctionTriple, _HookFunction
+from hook_functions import (
+    HookFunctionTriple,
+    _HookFunction, 
+    _DistributedHookFunction,
+)
 from utils import _recursively_find_first_tensor, _flatten, _unflatten
+from distributed_utils import (
+    _set_activation_group,
+)
 
 _LayerInputs = Any
 _LayerOutputs = Any
@@ -67,6 +74,8 @@ class FlexModel(nn.Module):
 
         self._hook_fn_handles: Dict[str, _HookHandle] = {}
 
+        self._hook_fn_impl = _HookFunction
+
     def register_hook_function_triple(
         self,
         hook_fn_triple: HookFunctionTriple,
@@ -74,7 +83,7 @@ class FlexModel(nn.Module):
         """Given user hook reqest, generate hook function and store it."""
         # Instantiate _HookFunction with user-provided hook data, then run
         # gen to create pytorch-facing hook function
-        pytorch_hook_fn = _HookFunction(
+        pytorch_hook_fn = self._hook_fn_impl(
             hook_fn_triple,
             self.output_ptr,
         ).gen_hook_function()
@@ -109,4 +118,9 @@ class DistributedFlexModel(FlexModel):
     def __init__(self, ranks: List[int], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ranks = ranks
-        # TODO: Init activation parallel groups
+
+        _set_activation_group(self.ranks)
+        self._hook_fn_impl = _DistributedHookFunction
+
+        logger.info(f"Initialzed DistributedFlexModel on "
+                    f"rank{torch.distributed.get_rank()}")

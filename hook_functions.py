@@ -135,22 +135,28 @@ def _hook_function(
     # Parse layer outputs
     tensor, repack_fn = func._parse(outputs)
 
-    # Rearrange
-    logger.info(f"Module {func._module_name} - initial shape: {tensor.shape}")
-    tensor, undo_rearrange_fn = func._rearrange(tensor)
-    logger.info(f"Module {func._module_name} - bind/edit shape: {tensor.shape}")
+    # Only rank0 gets the full activation tensor. Other ranks get their
+    # corresponding tensor shards. This is useful when it comes to broadcast/
+    # scatter outputs.
+    if (torch.distributed.is_initialized() and torch.distributed.get_rank() == 0 or
+            not torch.distributed.is_initialized()):
+        # Rearrange
+        logger.info(f"Module {func._module_name} - initial shape: {tensor.shape}")
+        tensor, undo_rearrange_fn = func._rearrange(tensor)
+        logger.info(f"Module {func._module_name} - bind/edit shape: {tensor.shape}")
 
-    # Edit
-    tensor = func._edit(tensor)
+        # Edit
+        tensor = func._edit(tensor)
 
-    # Bind copy to output dict
-    func._bind(tensor)
+        # Bind copy to output dict
+        func._bind(tensor)
 
-    # Undo rearrange
-    tensor = undo_rearrange_fn(tensor)
-    logger.info(f"Module {func._module_name} - return shape: {tensor.shape}")
+        # Undo rearrange
+        tensor = undo_rearrange_fn(tensor)
+        logger.info(f"Module {func._module_name} - return shape: {tensor.shape}")
 
-    # Undo parse
+    # All ranks participate in repacking (broadcast/scatter included), implicit
+    # barrier here.
     outputs = repack_fn(tensor)
 
     return outputs
@@ -168,8 +174,6 @@ class _DistributedHookFunction(_HookFunction):
         assert self._shape is not None
         assert torch.distributed.is_initialized()
 
-        # TODO: After call to _infer_collective, we can cache the corresponding
-        #       collective functions
         self._collect_fn_cache = None
         self._distribute_fn_cache = None
 
@@ -183,9 +187,14 @@ class _DistributedHookFunction(_HookFunction):
             self._collect_fn_cache = collect_fn
             self._distribute_fn_cache = distribute_fn
 
-        logger.info(
-            f"Rank{torch.distributed.get_rank()}: Collecting using {self._collect_fn_cache.__name__}"
-        )
+        if isinstance(self._collect_fn_cache, partial):
+            msg = (f"Rank{torch.distributed.get_rank()}: Collecting using "
+                   f"{self._collect_fn_cache.func.__name__}")
+        else:
+            msg = (f"Rank{torch.distributed.get_rank()}: Collecting using "
+            f"{self._collect_fn_cache.__name__}")
+        logger.info(msg)
+
         return self._collect_fn_cache(tensor)
 
     def _distribute(self, tensor: Tensor) -> Tensor:
@@ -195,6 +204,32 @@ class _DistributedHookFunction(_HookFunction):
         assert self._distribute_fn_cache is not None
 
         logger.info(
-            f"Rank{torch.distributed.get_rank()}: Distributing using {self._distribute_fn_cache.__name__}"
+            f"Rank{torch.distributed.get_rank()}: Distributing using "
+            f"{self._distribute_fn_cache.__name__}"
         )
         return self._distribute_fn_cache(tensor)
+
+    def _parse(
+        self,
+        outputs: Union[_LayerOutputs, Tensor],
+    ) -> Tuple[Tensor, Callable]:
+        """Parse out the activation tensor."""
+        # Get container treedef and tensor leaf nodes
+        treedef, leaves = _flatten(outputs)
+
+        # Get the target tensor
+        # TODO: Let user bias which leaf tensor to retrieve
+        tensor, other_leaves = leaves[0], leaves[1:]
+
+        tensor = self._collect(tensor)
+
+        # Define undo function to re-pack the edited activation tensor
+        def _repack(
+            _treedef,
+            _leaves,
+            _edited_tensor,
+        ):
+            _edited_tensor = self._distribute(_edited_tensor)
+            return _unflatten(_treedef, [_edited_tensor] + _leaves)
+
+        return tensor, partial(_repack, treedef, other_leaves)

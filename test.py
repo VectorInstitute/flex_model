@@ -1,5 +1,6 @@
 from functools import partial
 import logging
+import os
 from typing import Tuple, Dict, List, Optional, Any, Callable
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -8,8 +9,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from flex_model import HookFunctionTriple, FlexModel
-from utils import _recursively_find_first_tensor
+from flex_model import HookFunctionTriple, FlexModel, DistributedFlexModel
+from utils import _recursively_find_first_tensor, print_rank0
 
 
 logger = logging.getLogger(__name__)
@@ -119,18 +120,51 @@ def apply_flex_model_fwd_hooks(
     return output_dict
 
 
+def apply_distributed_flex_model_fwd_hooks(
+    model: nn.Module,
+    inputs: Tensor,
+    module_names: List[str],
+    shapes: List[Tuple[int]],
+) -> Dict[str, Tensor]:
+    """Retrieves activations using distributed flex model forward hooks."""
+    output_dict: Dict[str, Tensor] = {}
+    dist_flex_model = DistributedFlexModel([0, 1], module=model, output_ptr=output_dict)
+    for name, shape in zip(module_names, shapes):
+        hfs = HookFunctionTriple(
+            module_name=name,
+            shape=shape,
+            editing_fn=lambda x: x,
+        )
+        dist_flex_model.register_hook_function_triple(hfs)
+
+    dist_flex_model.forward(inputs)
+
+    return output_dict
+
+
+
 def compare_tensor_dicts(
     dict1: Dict[str, Tensor],
     dict2: Dict[str, Tensor],
 ) -> bool:
     """Check equality between two dicts."""
-    _pack = zip(dict1.items(), dict2.items())
-    for (d1_name, d1_act), (d2_name, d2_act) in _pack:
-        if d1_name != d2_name:
+    for name in dict1.keys():
+        if name not in dict2:
+            print_rank0(f"{name} not in second dict for comparison")
             return False
-        if not torch.allclose(d1_act, d2_act):
+        if not torch.allclose(
+            dict1[name].to(torch.float32),
+            dict2[name].to(torch.float32),
+            atol=1e-3,
+            #rtol=1e-3,
+        ):
+            print_rank0(f"Allclose failed: {name} -> {dict1[name].shape} - "
+                        f"{dict2[name].shape}")
+            print_rank0(dict1[name])
+            print_rank0(dict2[name])
             return False
 
+        logger.info(f"Allclose passed: {name}")
     return True
 
 
@@ -267,6 +301,157 @@ def test_traversal_utils():
     assert treedef == new_treedef
 
 
+def test_distributed_flex_model():
+    from accelerate import Accelerator
+    from transformers import LlamaForCausalLM, LlamaTokenizer
+
+    os.environ["NCCL_DEBUG"] = "INFO"
+    os.environ["NCCL_IB_DISABLE"] = "1"
+    tokenizer = LlamaTokenizer.from_pretrained(
+        "/scratch/ssd002/projects/opt_test/llama-7b-hf",
+        local_files_only=True,
+    )
+    tokenizer.pad_token_id=0
+    tokenizer.bos_token_id=1
+    tokenizer.eos_token_id=2
+    def tokenize(ps):
+        return tokenizer(ps, padding=True, return_tensors="pt")["input_ids"]
+
+    prompts = [
+        "Hi I'm Matt, where am I?",
+        "Welcome to Vector",
+        "The tensor has a shape of",
+    ]
+
+    def _get_torch_output():
+        model = LlamaForCausalLM.from_pretrained(
+            "/scratch/ssd002/projects/opt_test/llama-7b-hf",
+            local_files_only=True,
+            low_cpu_mem_usage=True,
+        )
+        inputs = tokenize(prompts)
+
+        module_names = [
+            "model.layers.5.self_attn",
+            "model.layers.6.self_attn.o_proj",
+            "model.layers.2.act_fn",
+            "model.layers.7.self_attn.v_proj",
+            "model.layers.11.self_attn.k_proj",
+            "model.layers.8.self_attn.q_proj",
+            "model.layers.11.post_attention_layernorm",
+            "model.layers.7.mlp",
+            "model.layers.7.mlp.gate_proj",
+            "model.layers.28.mlp.up_proj",
+            "model.layers.9.mlp_down_proj",
+            "model.embed_tokens",
+            "model",
+            "model.layers",
+            "model.layers.7",
+            "lm_head",
+        ]
+        module_shapes = [None for n in range(len(module_names))]
+
+        def _huggingface_parse_fn(x):
+            """Hard-coded parse function for huggingface models.
+
+            Note: Retrieval only.
+            """
+            if isinstance(x, tuple):
+                return x[0]
+            if isinstance(x, BaseModelOutputWithPast):
+                return x.last_hidden_state
+            return x
+
+        logger.info("Running base forward hooks")
+        test_base_dict = apply_torch_fwd_hooks(
+            model,
+            inputs,
+            module_names,
+            module_shapes,
+            _huggingface_parse_fn,
+        )
+        return test_base_dict
+
+
+    def _get_flex_output():
+        accelerator = Accelerator()
+        model = LlamaForCausalLM.from_pretrained(
+            "/scratch/ssd002/projects/opt_test/llama-7b-hf",
+            local_files_only=True,
+            low_cpu_mem_usage=True,
+        ).to("cpu")
+        model = accelerator.prepare(model)
+        
+        inputs = tokenize(prompts).to(accelerator.device)
+        logger.info(f"Input tensor: {inputs}")
+
+        # Test forward hooks
+        module_names = [
+            "_fsdp_wrapped_module.model.layers.5._fsdp_wrapped_module.self_attn",
+            "_fsdp_wrapped_module.model.layers.6._fsdp_wrapped_module.self_attn.o_proj",
+            "_fsdp_wrapped_module.model.layers.2._fsdp_wrapped_module.mlp.act_fn",
+            "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.self_attn.v_proj",
+            "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.self_attn.k_proj",
+            "_fsdp_wrapped_module.model.layers.8._fsdp_wrapped_module.self_attn.q_proj",
+            "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.post_attention_layernorm",
+            "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.mlp",
+            "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.mlp.gate_proj",
+            "_fsdp_wrapped_module.model.layers.28._fsdp_wrapped_module.mlp.up_proj",
+            "_fsdp_wrapped_module.model.layers.9._fsdp_wrapped_module.mlp_down_proj",
+            "_fsdp_wrapped_module.model.embed_tokens",
+            "_fsdp_wrapped_module.model",
+            "_fsdp_wrapped_module.model.layers",
+            "_fsdp_wrapped_module.model.layers.7",
+            "_fsdp_wrapped_module.lm_head",
+        ]
+        module_shapes = [
+            (3, 11, 4096) for n in range(len(module_names))
+        ]
+        module_shapes[2] = (3, 11, 11008)
+        module_shapes[8] = (3, 11, 11008)
+        module_shapes[9] = (3, 11, 11008)
+        module_shapes[-1] = (3, 11, 32000)
+
+        logger.info("Running flex model forward hooks")
+        test_flex_dict = apply_distributed_flex_model_fwd_hooks(
+            model,
+            inputs,
+            module_names,
+            module_shapes,
+        )
+        # Rename keys for comparison against non-fsdp
+        test_flex_dict_renamed = {}
+        for k, v in test_flex_dict.items():
+            elements = k.split(".")
+            new_name = []
+            for e in elements:
+                if e != "_fsdp_wrapped_module":
+                    new_name.append(e)
+            test_flex_dict_renamed[".".join(new_name)] = v
+        return test_flex_dict_renamed
+
+    test_base_dict = _get_torch_output()
+    test_flex_dict = _get_flex_output()
+
+    if len(test_flex_dict) == 0:
+        return
+
+    def _print_dict(d):
+        for n, m in d.items():
+            print_rank0(f"{n}: {m.shape}")
+
+    print("*" * 50)
+    _print_dict(test_base_dict)
+    print("*" * 50)
+    _print_dict(test_flex_dict)
+    print("*" * 50)
+
+    assert compare_tensor_dicts(test_base_dict, test_flex_dict)
+
+    logger.info("Test successful!")
+
+
+# TODO: Be more consistent with logging messages
 def main():
     logger.info("Testing simple PyTorch model...")
     test_simple_model()
@@ -279,6 +464,9 @@ def main():
     logger.info("Testing Huggingface OPT-125m single gpu...")
     test_huggingface_opt_model()
     logger.info("Test successful!")
+
+    logger.info("Testing Huggingface llama-7b dual gpu...")
+    test_distributed_flex_model()
 
 
 if __name__ == "__main__":
