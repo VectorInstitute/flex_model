@@ -19,8 +19,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from utils import _recursively_find_first_tensor, _flatten, _unflatten
-from distributed_utils import _infer_collective
+from flex_model.utils import _recursively_find_first_tensor, _flatten, _unflatten
+from flex_model.distributed_utils import _infer_collective
 
 _LayerInputs = Any
 _LayerOutputs = Any

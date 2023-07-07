@@ -20,13 +20,13 @@ import torch.nn as nn
 from torch import Tensor
 
 
-from hook_functions import (
+from flex_model.hook_functions import (
     HookFunctionTriple,
     _HookFunction, 
     _DistributedHookFunction,
 )
-from utils import _recursively_find_first_tensor, _flatten, _unflatten
-from distributed_utils import (
+from flex_model.utils import _recursively_find_first_tensor, _flatten, _unflatten
+from flex_model.distributed_utils import (
     _set_activation_group,
 )
 

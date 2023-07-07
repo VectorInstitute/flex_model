@@ -1,6 +1,5 @@
 from functools import partial
 import logging
-from utils import print_rank0
 from typing import Dict, Optional, List, Callable, Tuple, Any
 
 from transformers.modeling_outputs import BaseModelOutputWithPast
@@ -14,7 +13,9 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 
-from flex_model import FlexModel, DistributedFlexModel, HookFunctionTriple
+
+from flex_model.utils import print_rank0
+from flex_model.model_wrappers import FlexModel, DistributedFlexModel, HookFunctionTriple
 
 
 logger = logging.getLogger(__name__)

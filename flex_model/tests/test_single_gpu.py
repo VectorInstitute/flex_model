@@ -8,9 +8,9 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from flex_model import HookFunctionTriple, FlexModel, DistributedFlexModel
-from utils import _recursively_find_first_tensor, print_rank0
-from testing_utils import (
+from flex_model.model_wrappers import HookFunctionTriple, FlexModel, DistributedFlexModel
+from flex_model.utils import _recursively_find_first_tensor, print_rank0
+from flex_model.tests.testing_utils import (
     parse_base_model_output_with_past,
     SimpleModel,
     compare_tensor_dicts,

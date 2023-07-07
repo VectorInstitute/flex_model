@@ -1,0 +1,5 @@
+accelerate
+sentencepiece
+tokenizers
+torch
+transformers

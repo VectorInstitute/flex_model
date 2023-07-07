@@ -10,10 +10,10 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from flex_model import HookFunctionTriple, FlexModel, DistributedFlexModel
-from utils import _recursively_find_first_tensor, print_rank0
+from flex_model.model_wrappers import HookFunctionTriple, FlexModel, DistributedFlexModel
+from flex_model.utils import _recursively_find_first_tensor, print_rank0
 
-from testing_utils import (
+from flex_model.tests.testing_utils import (
     print_return_dict,
     remove_module_name_prefix,
     parse_base_model_output_with_past,
@@ -22,7 +22,7 @@ from testing_utils import (
     apply_distributed_flex_model_fwd_hooks,
     get_llama_13b_hf,
 )
-from testing_constants import (
+from flex_model.tests.testing_constants import (
     _PROMPTS,
     _LLAMA_VANILLA_TORCH_MODULE_NAMES,
     _LLAMA_VANILLA_TORCH_MODULE_SHAPES,
