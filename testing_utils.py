@@ -51,6 +51,11 @@ def parse_base_model_output_with_past(x):
     return x
 
 
+def dummy_editing_fn_with_log(x):
+    logger.info(f"Running dummy editing function")
+    return x
+
+
 def compare_tensor_dicts(
     dict1: Dict[str, Tensor],
     dict2: Dict[str, Tensor],
@@ -104,14 +109,14 @@ def get_opt_125m():
     return model, tokenizer
 
 
-def get_llama_7b_hf():
+def get_llama_13b_hf():
     model = LlamaForCausalLM.from_pretrained(
-        "/scratch/ssd002/projects/opt_test/llama-7b-hf",
+        "/scratch/ssd002/projects/opt_test/llama-13b-hf",
         local_files_only=True,
-        low_cpu_mem_usage=True,
+        #low_cpu_mem_usage=True,
     )
     tokenizer = LlamaTokenizer.from_pretrained(
-        "/scratch/ssd002/projects/opt_test/llama-7b-hf",
+        "/scratch/ssd002/projects/opt_test/llama-13b-hf",
         local_files_only=True,
     )
     tokenizer.pad_token_id=0
@@ -191,7 +196,7 @@ def apply_flex_model_fwd_hooks(
         hfs = HookFunctionTriple(
             module_name=name,
             shape=shape,
-            editing_fn=lambda x: x,
+            editing_fn=dummy_editing_fn_with_log,
         )
         flex_model.register_hook_function_triple(hfs)
 
@@ -211,12 +216,16 @@ def apply_distributed_flex_model_fwd_hooks(
     NOTE: Hard-coded for a world size of 2.
     """
     output_dict: Dict[str, Tensor] = {}
-    dist_flex_model = DistributedFlexModel([0, 1], module=model, output_ptr=output_dict)
+    dist_flex_model = DistributedFlexModel(
+        ranks=[0, 1],
+        module=model,
+        output_ptr=output_dict,
+    )
     for name, shape in zip(module_names, shapes):
         hfs = HookFunctionTriple(
             module_name=name,
             shape=shape,
-            editing_fn=lambda x: x,
+            editing_fn=dummy_editing_fn_with_log,
         )
         dist_flex_model.register_hook_function_triple(hfs)
 

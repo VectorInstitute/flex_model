@@ -56,6 +56,7 @@ def _handle_activation_sharded(tensor: Tensor, shape: Tuple[int]) -> Tuple[Calla
     # Case2: Uneven sharding, need to keep track of where the split is - 
     # Assumed uneven DP
     else:
+        logger.info(f"Uneven sharding detected: {tensor.shape}, {shape}")
         raise NotImplementedError
 
     return collect_fn, distribute_fn

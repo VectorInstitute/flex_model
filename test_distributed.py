@@ -20,7 +20,7 @@ from testing_utils import (
     compare_tensor_dicts,
     apply_torch_fwd_hooks,
     apply_distributed_flex_model_fwd_hooks,
-    get_llama_7b_hf,
+    get_llama_13b_hf,
 )
 from testing_constants import (
     _PROMPTS,
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 def _llama_vanilla_torch_run() -> Dict[str, Tensor]:
     """Forward pass through single gpu llama model and apply forward hooks."""
-    model, tokenize_fn = get_llama_7b_hf()
+    model, tokenize_fn = get_llama_13b_hf()
 
     inputs = tokenize_fn(_PROMPTS)
 
@@ -55,7 +55,7 @@ def _llama_vanilla_torch_run() -> Dict[str, Tensor]:
 def _llama_fsdp_run() -> Dict[str, Tensor]:
     """Forward pass through dual gpu fsdp llama model and apply forward hooks.
     """
-    model, tokenize_fn =get_llama_7b_hf()
+    model, tokenize_fn = get_llama_13b_hf()
 
     accelerator = Accelerator()
     model = accelerator.prepare(model)
@@ -76,6 +76,10 @@ def _llama_fsdp_run() -> Dict[str, Tensor]:
 def _llama_megatron_run() -> Dict[str, Tensor]:
     """Forward pass through dual gpu fsdp llama model and apply forward hooks.
     """
+    model, tokenize_fn = get_llama_13b_hf()
+
+    accelerator = Accelerator()
+    model = accelerator.prepare(model)
     raise NotImplementedError
 
 
