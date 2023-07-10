@@ -85,7 +85,10 @@ def _handle_activation_full(tensor: Tensor, shape: Tuple[int]) -> Tuple[Callable
     return collect_fn, distribute_fn
 
 
-def _infer_collective(tensor: Tensor, shape: Tuple[int]) -> Tuple[Callable, Callable]:
+def _infer_collective(
+    tensor: Tensor,
+    shape: Tuple[int, ...]
+) -> Tuple[Callable, Callable]:
     """
     Given an actiation tensor and expected shape, infer the proper
     comm. collective to materialize the true activation tensor.

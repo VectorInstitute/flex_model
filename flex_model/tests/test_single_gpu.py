@@ -8,8 +8,13 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from flex_model.model_wrappers import HookFunctionTriple, FlexModel, DistributedFlexModel
-from flex_model.utils import _recursively_find_first_tensor, print_rank0
+from flex_model.model_wrappers import FlexModel
+from flex_model._traverse_utils import (
+    _recursively_find_first_tensor,
+    print_rank0,
+    _flatten,
+    _unflatten,
+)
 from flex_model.tests.testing_utils import (
     parse_base_model_output_with_past,
     SimpleModel,
@@ -110,7 +115,6 @@ def test_huggingface_opt_model():
 
 
 def test_traversal_utils():
-    from utils import _recursively_find_first_tensor
 
     target_tensor = torch.randn(2, 2)
     outputs = (
@@ -123,8 +127,6 @@ def test_traversal_utils():
     tensor = _recursively_find_first_tensor(outputs)
 
     assert torch.equal(tensor, target_tensor)
-
-    from utils import _flatten, _unflatten
 
     # TODO: More test cases here
     outputs = [

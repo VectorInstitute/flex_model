@@ -14,8 +14,8 @@ from torch import Tensor
 import torch.nn as nn
 
 
-from flex_model.utils import print_rank0
-from flex_model.model_wrappers import FlexModel, DistributedFlexModel, HookFunctionTriple
+from flex_model._traverse_utils import print_rank0
+from flex_model.model_wrappers import FlexModel, HookFunction
 
 
 logger = logging.getLogger(__name__)
@@ -194,42 +194,13 @@ def apply_flex_model_fwd_hooks(
     output_dict: Dict[str, Tensor] = {}
     flex_model = FlexModel(model, output_dict)
     for name, shape in zip(module_names, shapes):
-        hfs = HookFunctionTriple(
+        hook_fn = HookFunction(
             module_name=name,
-            shape=shape,
-            editing_fn=dummy_editing_fn_with_log,
+            expected_shape=shape,
+            editing_function=dummy_editing_fn_with_log,
         )
-        flex_model.register_hook_function_triple(hfs)
+        flex_model.register_hook_function(hook_fn)
 
     flex_model.forward(inputs)
-
-    return output_dict
-
-
-def apply_distributed_flex_model_fwd_hooks(
-    model: nn.Module,
-    inputs: Tensor,
-    module_names: List[str],
-    shapes: List[Tuple[int]],
-) -> Dict[str, Tensor]:
-    """Retrieves activations using distributed flex model forward hooks.
-
-    NOTE: Hard-coded for a world size of 2.
-    """
-    output_dict: Dict[str, Tensor] = {}
-    dist_flex_model = DistributedFlexModel(
-        ranks=[0, 1],
-        module=model,
-        output_ptr=output_dict,
-    )
-    for name, shape in zip(module_names, shapes):
-        hfs = HookFunctionTriple(
-            module_name=name,
-            shape=shape,
-            editing_fn=dummy_editing_fn_with_log,
-        )
-        dist_flex_model.register_hook_function_triple(hfs)
-
-    dist_flex_model.forward(inputs)
 
     return output_dict

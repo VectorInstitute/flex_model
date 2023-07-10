@@ -10,8 +10,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from flex_model.model_wrappers import HookFunctionTriple, FlexModel, DistributedFlexModel
-from flex_model.utils import _recursively_find_first_tensor, print_rank0
+from flex_model._traverse_utils import _recursively_find_first_tensor, print_rank0
 
 from flex_model.tests.testing_utils import (
     print_return_dict,
@@ -19,7 +18,7 @@ from flex_model.tests.testing_utils import (
     parse_base_model_output_with_past,
     compare_tensor_dicts,
     apply_torch_fwd_hooks,
-    apply_distributed_flex_model_fwd_hooks,
+    apply_flex_model_fwd_hooks,
     get_llama_13b_hf,
 )
 from flex_model.tests.testing_constants import (
@@ -63,7 +62,7 @@ def _llama_fsdp_run() -> Dict[str, Tensor]:
     inputs = tokenize_fn(_PROMPTS).to(accelerator.device)
     logger.info(f"Rank{torch.distributed.get_rank()} inputs: {inputs}")
 
-    output_dict = apply_distributed_flex_model_fwd_hooks(
+    output_dict = apply_flex_model_fwd_hooks(
         model=model,
         inputs=inputs,
         module_names=_LLAMA_FSDP_MODULE_NAMES,
