@@ -118,7 +118,7 @@ def main():
     os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["NCCL_IB_DISABLE"] = "1"
 
-    logger.info("Testing Huggingface llama-7b dual gpu...")
+    logger.info("Testing Huggingface llama-13b dual gpu...")
     test_distributed_flex_model_fsdp()
 
 

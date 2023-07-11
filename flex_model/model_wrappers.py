@@ -49,6 +49,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# TODO: Implement hook functions which can add grad-requiring layers
 class HookFunction(_HookFunctionState):
     def __init__(
         self,
@@ -223,7 +224,6 @@ class FlexModel(nn.Module, _FlexModelState):
 
     NOTE: See `torch.distributed.fsdp` for pytorch model wrapper example.
     """
-
     def __init__(
         self,
         module: nn.Module,
