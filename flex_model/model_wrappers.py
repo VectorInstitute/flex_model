@@ -51,6 +51,17 @@ logger = logging.getLogger(__name__)
 
 # TODO: Implement hook functions which can add grad-requiring layers
 class HookFunction(_HookFunctionState):
+    """Respondible for frontend hook function via templating or codegen.
+
+    Args:
+        module_name (str):
+            The module name to be hooked into.
+        expected_shape (Tuple[int, ...]):
+            Expected shape of the activation tensor.
+        editing_function (Optional[Callable]):
+            Optional editing function which will be applied to the activation
+            tensor.
+    """
     def __init__(
         self,
         module_name: str,
@@ -113,6 +124,7 @@ class HookFunction(_HookFunctionState):
         tensor, other_leaves = leaves[0], leaves[1:]
         assert tensor is not None
 
+        # TODO: Pull knowledge of dist state out into flex model only
         if self._using_torch_distributed:
             tensor = self._distributed_collect(tensor)
 
@@ -222,12 +234,19 @@ class FlexModel(nn.Module, _FlexModelState):
     or optionally from the FlexModel. Contains no additional state
     besides metadata and hook functions.
 
-    NOTE: See `torch.distributed.fsdp` for pytorch model wrapper example.
+    Note: See `torch.distributed.fsdp` for pytorch model wrapper example.
+
+    Args:
+        module (nn.Module):
+            PyTorch module to be wrapped.
+        output_ptr (Dict[str, Tensor]):
+            Object where retrieved activation are bound to during execution of
+            the hook function.
     """
     def __init__(
         self,
         module: nn.Module,
-        output_ptr: Dict[str, Any],
+        output_ptr: Dict[str, Tensor],
     ):
         super().__init__()
         self.module = module
