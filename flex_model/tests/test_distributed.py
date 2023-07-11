@@ -75,10 +75,6 @@ def _llama_fsdp_run() -> Dict[str, Tensor]:
 def _llama_megatron_run() -> Dict[str, Tensor]:
     """Forward pass through dual gpu fsdp llama model and apply forward hooks.
     """
-    model, tokenize_fn = get_llama_13b_hf()
-
-    accelerator = Accelerator()
-    model = accelerator.prepare(model)
     raise NotImplementedError
 
 

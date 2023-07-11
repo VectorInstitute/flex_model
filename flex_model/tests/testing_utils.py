@@ -130,6 +130,33 @@ def get_llama_13b_hf():
     return model, tokenize
 
 
+def get_llama_13b_megatron():
+    from flex_model.tests._llama_megatron_utils import load_llama, setup_model_parallel
+
+    local_rank, world_size = setup_model_parallel()
+
+    model, _ = load_llama(
+        local_rank=local_rank,
+        world_size=world_size,
+        max_seq_len=512,
+        max_batch_size=32,
+        ckpt_dir="/ssd005/projects/llm/llama/LLaMA/13B",
+        tokenizer_path="/ssd005/projects/llm/llama/LLaMA/tokenizer.model",
+    )
+    tokenizer = LlamaTokenizer.from_pretrained(
+        "/scratch/ssd002/projects/opt_test/llama-13b-hf",
+        local_files_only=True,
+    )
+    tokenizer.pad_token_id=0
+    tokenizer.bos_token_id=1
+    tokenizer.eos_token_id=2
+
+    def tokenize(ps):
+        return tokenizer(ps, padding=True, return_tensors="pt")["input_ids"]
+
+    return model, tokenize
+
+
 def apply_torch_fwd_hooks(
     model: nn.Module,
     inputs: Tensor,
@@ -189,6 +216,8 @@ def apply_flex_model_fwd_hooks(
     inputs: Tensor,
     module_names: List[str],
     shapes: List[Tuple[int]],
+    *args,
+    **kwargs,
 ) -> Dict[str, Tensor]:
     """Retrieve activations using flex model forward hooks."""
     output_dict: Dict[str, Tensor] = {}
@@ -201,6 +230,6 @@ def apply_flex_model_fwd_hooks(
         )
         flex_model.register_hook_function(hook_fn)
 
-    flex_model.forward(inputs)
+    flex_model.forward(inputs, *args, **kwargs)
 
     return output_dict
