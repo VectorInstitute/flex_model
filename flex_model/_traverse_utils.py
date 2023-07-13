@@ -20,14 +20,6 @@ ScalarNode = Any
 _INTERNAL_NODE_TYPE_REGISTRY: Dict[type, InternalNode] = {}
 
 
-def print_rank0(msg):
-    if torch.distributed.is_initialized():
-        if torch.distributed.get_rank() == 0:
-            print(msg)
-    else:
-        print(msg)
-
-
 def register_internal_node_type(internal_node_type: type) -> Callable:
     def _inner(_internal_node_cls: InternalNode) -> None:
         _INTERNAL_NODE_TYPE_REGISTRY[internal_node_type] = _internal_node_cls

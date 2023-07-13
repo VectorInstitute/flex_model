@@ -36,25 +36,25 @@ def test_simple_model():
     outputs = model(inputs)
 
     # Test forward hooks
-    module_names = ["fc1"]
-    module_shapes = [(8 * 4, 16 * 4)]
+    module_names_with_shapes = {
+        "fc1": (8 * 4, 16 * 4),
+    }
 
     # Vanilla pytorch forward hooks
     logger.info("Running base forward hooks")
     test_base_dict = apply_torch_fwd_hooks(
         model,
         inputs,
-        module_names,
-        module_shapes,
+        module_names_with_shapes,
     )
 
     # Flex model forward hooks
     logger.info("Running flex model forward hooks")
+    
     test_flex_dict = apply_flex_model_fwd_hooks(
         model,
         inputs,
-        module_names,
-        module_shapes,
+        module_names_with_shapes,
     )
 
     # Shape dumped is different, reshape back for comparison
@@ -65,6 +65,7 @@ def test_simple_model():
 
 
 
+# NOTE: Deprecated
 def test_huggingface_opt_model():
     model, tokenizer = get_opt_125m()
 
@@ -157,9 +158,9 @@ def main():
     test_traversal_utils()
     logger.info("Test successful!")
 
-    logger.info("Testing Huggingface OPT-125m single gpu...")
-    test_huggingface_opt_model()
-    logger.info("Test successful!")
+    #logger.info("Testing Huggingface OPT-125m single gpu...")
+    #test_huggingface_opt_model()
+    #logger.info("Test successful!")
 
 
 if __name__ == "__main__":

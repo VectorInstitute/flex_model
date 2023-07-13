@@ -39,6 +39,11 @@ def _get_activation_parallel_world_size() -> int:
     )
 
 
+def print_rank0(msg):
+    if dist.is_initialized() and dist.get_rank() == 0:
+        print(msg, flush=True)
+
+
 def _handle_activation_sharded(tensor: Tensor, shape: Tuple[int]) -> Tuple[Callable, Callable]:
     """Get comm. collectives for sharded activation tensors."""
     assert len(tensor.shape) == len(shape), f"Unequal shapes! {tensor.shape}, {shape}"
@@ -64,9 +69,7 @@ def _handle_activation_sharded(tensor: Tensor, shape: Tuple[int]) -> Tuple[Calla
 
 def _handle_activation_full(tensor: Tensor, shape: Tuple[int]) -> Tuple[Callable, Callable]:
     """Get comm. collectives for full-rank activation tensors."""
-    # Named function for ease of logging
-    def _unity(x): return x
-
+    
     # Check if all ranks have the same tensor
     world_size = _get_activation_parallel_world_size()
     comparison_tensor = _all_reduce_sync(tensor)
@@ -105,6 +108,11 @@ def _infer_collective(
     return collect_fn, distribute_fn
 
 
+def _unity(tensor: Tensor):
+    print_rank0(f"Unity | In: {tensor.shape}")
+    return tensor
+
+
 def _broadcast_rank0_sync(
     tensor: Tensor,
 ) -> Tensor:
@@ -115,6 +123,9 @@ def _broadcast_rank0_sync(
         group=_get_activation_parallel_group(),
         async_op=False,
     )
+
+    print_rank0(f"Broadcast | In: {tensor.shape}")
+
     return tensor
 
 
@@ -142,7 +153,14 @@ def _gather_rank0_sync(
     if torch.distributed.get_rank() != 0:
         return tensor
 
-    return torch.cat(gather_list, dim=axis)
+    print_rank0(gather_list)
+    output_tensor = torch.cat(gather_list, dim=axis)
+    print_rank0(
+        f"Gather | In: {tensor.shape} Out: {output_tensor.shape} Dim: {axis} "
+        f"Collecting {len(gather_list)} chunks."
+    )
+
+    return output_tensor
 
 
 def _all_reduce_sync(
@@ -187,10 +205,16 @@ def _scatter_rank0_sync(
     axis: int = 0,
 ) -> Tensor:
     """Synchronous scatter from rank0 to all."""
-    shape = list(tensor.shape)
-    world_size = _get_activation_parallel_world_size()
-    assert shape[axis] % world_size == 0
-    shape[axis] //= world_size
+    # Rank0 has full-rank act tensor, need to shard output tensor
+    if dist.get_rank() == 0:
+        shape = list(tensor.shape)
+        world_size = _get_activation_parallel_world_size()
+        assert shape[axis] % world_size == 0
+        shape[axis] //= world_size
+
+    # Non-rank0 workers already have stale sharded tensors
+    else:
+        shape = tensor.shape
 
     output_tensor = torch.empty(
         shape,
@@ -198,15 +222,28 @@ def _scatter_rank0_sync(
         layout=tensor.layout,
         device=tensor.device,
     )
+
+    if dist.get_rank() == 0:
+        scatter_list = list(torch.chunk(
+            tensor,
+            chunks=world_size,
+            dim=axis,
+        ))
+
+        print_rank0(
+            f"Scatter | In: {tensor.shape} Out: {output_tensor.shape} Dim: {axis} "
+            f"Sending {len(scatter_list)} chunks."
+        )
+
+    else:
+        scatter_list = None
+
     dist.scatter(
         tensor=output_tensor,
-        scatter_list=torch.chunk(
-            tensor,
-            chunks=_get_activation_parallel_world_size(),
-            dim=0,
-        ),
+        scatter_list=scatter_list,
         src=0,
         group=_get_activation_parallel_group(),
         async_op=False,
     )
+
     return output_tensor
