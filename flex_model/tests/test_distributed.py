@@ -31,6 +31,7 @@ from flex_model.tests.testing_constants import (
 
 
 logger = logging.getLogger(__name__)
+accelerator = Accelerator()
 
 
 def _llama_vanilla_torch_run() -> Dict[str, Tensor]:
@@ -39,13 +40,13 @@ def _llama_vanilla_torch_run() -> Dict[str, Tensor]:
 
     inputs = tokenize_fn(_PROMPTS).cuda()
 
-    output_dict = apply_torch_fwd_hooks(
+    output_dict, outputs = apply_torch_fwd_hooks(
         model=model,
         inputs=inputs,
         module_names_with_shapes=_LLAMA_VANILLA_TORCH_MODULES,
         parse_fn=parse_base_model_output_with_past,
     )
-    return output_dict
+    return output_dict, outputs
 
 
 def _llama_fsdp_run() -> Dict[str, Tensor]:
@@ -54,50 +55,45 @@ def _llama_fsdp_run() -> Dict[str, Tensor]:
     model, tokenize_fn = get_llama_13b_hf()
     model = model.cpu()
 
-    accelerator = Accelerator()
     model = accelerator.prepare(model)
 
     inputs = tokenize_fn(_PROMPTS).to(accelerator.device)
     logger.info(f"Rank{torch.distributed.get_rank()} inputs: {inputs}")
 
-    output_dict = apply_flex_model_fwd_hooks(
+    output_dict, outputs = apply_flex_model_fwd_hooks(
         model=model,
         inputs=inputs,
         module_names_with_shapes=_LLAMA_FSDP_MODULES,
     )
-    return output_dict
-
-
-def _llama_megatron_run() -> Dict[str, Tensor]:
-    """Forward pass through dual gpu fsdp llama model and apply forward hooks.
-    """
-    raise NotImplementedError
+    return output_dict, outputs
 
 
 def test_distributed_flex_model_fsdp():
     """Compare single gpu llama to fsdp llama."""
-    fsdp_output = _llama_fsdp_run()
+    fsdp_output, _ = _llama_fsdp_run()
 
-    vanilla_torch_output = _llama_vanilla_torch_run()
-    
-    # Prune non-rank0 workers
-    if len(fsdp_output) == 0:
+    if accelerator.is_local_main_process:
+        vanilla_torch_output, _ = _llama_vanilla_torch_run()
+        
+        # Prune non-rank0 workers
+        if len(fsdp_output) == 0:
+            return
+        
+        print("*" * 50)
+        print_return_dict(vanilla_torch_output)
+        print("*" * 50)
+        print_return_dict(fsdp_output)
+        print("*" * 50)
+
+        mapping = module_comparison_mapping(
+            _LLAMA_VANILLA_TORCH_MODULES,
+            _LLAMA_FSDP_MODULES,
+        )
+        compare_tensor_dicts(vanilla_torch_output, fsdp_output, mapping)
+
+        logger.info("Test complete!")
+    else:
         return
-
-    
-    print("*" * 50)
-    print_return_dict(vanilla_torch_output)
-    print("*" * 50)
-    print_return_dict(fsdp_output)
-    print("*" * 50)
-
-    mapping = module_comparison_mapping(
-        _LLAMA_VANILLA_TORCH_MODULES,
-        _LLAMA_FSDP_MODULES,
-    )
-    assert compare_tensor_dicts(vanilla_torch_output, fsdp_output, mapping)
-
-    logger.info("Test successful!")
 
 
 # TODO: Be more consistent with logging messages

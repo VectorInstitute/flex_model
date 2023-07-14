@@ -81,32 +81,11 @@ def compare_tensor_dicts(
             ):
                 logger.info(f"Allclose FAILED for {name1} - {name2}"
                             f". Max diff: {torch.abs(act1 - act2).max()}")
-                print_rank0(act1)
-                print_rank0(act2)
+                #print_rank0(act1)
+                #print_rank0(act2)
 
             else:
                 logger.info(f"Allclose PASSED for {name1} - {name2}")
-        return True
-
-    # TODO: Deprecate, all comparisons should require mapping
-    else:
-        for name in dict1.keys():
-            if name not in dict2:
-                print_rank0(f"{name} not in second dict for comparison")
-                return False
-            if not torch.allclose(
-                dict1[name].to(torch.float32),
-                dict2[name].to(torch.float32),
-                atol=1e-3,
-                #rtol=1e-3,
-            ):
-                print_rank0(f"Allclose failed: {name} -> {dict1[name].shape} - "
-                            f"{dict2[name].shape}")
-                print_rank0(dict1[name])
-                print_rank0(dict2[name])
-                return False
-
-            logger.info(f"Allclose passed: {name}")
         return True
 
 
@@ -233,12 +212,12 @@ def apply_torch_fwd_hooks(
             logger.info(f"Installing module: {name}")
 
     logger.info("Running forward")
-    _ = model.forward(inputs)
+    outputs = model.forward(inputs)
 
     for handle in hook_handles:
         handle.remove()
 
-    return output_dict
+    return output_dict, outputs
 
 def apply_flex_model_fwd_hooks(
     model: nn.Module,
@@ -258,6 +237,6 @@ def apply_flex_model_fwd_hooks(
         )
         flex_model.register_hook_function(hook_fn)
 
-    flex_model.forward(inputs, *args, **kwargs)
+    outputs = flex_model.forward(inputs, *args, **kwargs)
 
-    return output_dict
+    return output_dict, outputs

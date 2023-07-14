@@ -30,32 +30,32 @@ def _llama_megatron_run() -> Dict[str, Tensor]:
     inputs = tokenize_fn(_PROMPTS).cuda()
     logger.info(f"Rank{torch.distributed.get_rank()} inputs: {inputs}")
 
-    output_dict = apply_flex_model_fwd_hooks(
+    output_dict, outputs = apply_flex_model_fwd_hooks(
         model=model,
         inputs=inputs,
         module_names_with_shapes=_LLAMA_MEGATRON_MODULES,
         start_pos=0,
     )
-    return output_dict
+    return output_dict, outputs
 
 
 def test_distributed_flex_model_megatron():
     from flex_model.tests.test_distributed import _llama_vanilla_torch_run
-    megatron_output = _llama_megatron_run()
+    megatron_output, megatron_out = _llama_megatron_run()
 
     if dist.get_rank() == 0:
-        vanilla_torch_output = _llama_vanilla_torch_run()
+        vanilla_torch_output, vanilla_torch_out = _llama_vanilla_torch_run()
 
         mapping=module_comparison_mapping(
             _LLAMA_VANILLA_TORCH_MODULES,
             _LLAMA_MEGATRON_MODULES,
         )
-        assert compare_tensor_dicts(
+        compare_tensor_dicts(
             vanilla_torch_output,
             megatron_output,
             mapping=mapping,
         )
-        logger.info("Test successful")
+        logger.info("Test complete")
     else:
         return
 
