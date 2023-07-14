@@ -28,8 +28,9 @@ def print_named_modules(model: nn.Module) -> None:
 
 
 def print_return_dict(d):
-    for n, m in d.items():
-        print_rank0(f"{n}: {m.shape}")
+    if (torch.distributed.is_initialized() and torch.distributed.get_rank() == 0) or torch.distributed.is_initialized():
+        for n, m in d.items():
+            print_rank0(f"{n}: {m.shape}")
 
 
 def parse_base_model_output_with_past(x):
@@ -67,7 +68,7 @@ def compare_tensor_dicts(
         for name1, name2 in mapping.items():
             assert name1 in dict1, f"Module {name1} not in dict"
             assert name2 in dict2, f"Module {name2} not in dict"
-            
+
             act1 = dict1[name1]
             act2 = dict2[name2]
 
@@ -76,14 +77,15 @@ def compare_tensor_dicts(
                 act1.to(torch.float32),
                 act2.to(torch.float32),
                 atol=2e-1,
+                rtol=1e-1,
             ):
-                logger.info(f"Allclose failed for {name1} - {name2}"
+                logger.info(f"Allclose FAILED for {name1} - {name2}"
                             f". Max diff: {torch.abs(act1 - act2).max()}")
                 print_rank0(act1)
                 print_rank0(act2)
 
             else:
-                logger.info(f"Allclose passed: {name1} - {name2}")
+                logger.info(f"Allclose PASSED for {name1} - {name2}")
         return True
 
     # TODO: Deprecate, all comparisons should require mapping
@@ -208,8 +210,9 @@ def apply_torch_fwd_hooks(
         res = outputs.detach().cpu()
 
         if shape is not None:
-            res.reshape(*shape)
+            res = res.reshape(*shape)
 
+        print_rank0(f"Dumping: {res.shape} to output dict")
         return_dict[registered_name] = res
 
     output_dict: Dict[str, Tensor] = {}

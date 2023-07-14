@@ -33,11 +33,9 @@ from flex_model.tests.testing_constants import (
 logger = logging.getLogger(__name__)
 
 
-
 def _llama_vanilla_torch_run() -> Dict[str, Tensor]:
     """Forward pass through single gpu llama model and apply forward hooks."""
     model, tokenize_fn = get_llama_13b_hf()
-    print_named_modules(model)
 
     inputs = tokenize_fn(_PROMPTS).cuda()
 
@@ -54,7 +52,7 @@ def _llama_fsdp_run() -> Dict[str, Tensor]:
     """Forward pass through dual gpu fsdp llama model and apply forward hooks.
     """
     model, tokenize_fn = get_llama_13b_hf()
-    print_named_modules(model)
+    model = model.cpu()
 
     accelerator = Accelerator()
     model = accelerator.prepare(model)
@@ -78,9 +76,9 @@ def _llama_megatron_run() -> Dict[str, Tensor]:
 
 def test_distributed_flex_model_fsdp():
     """Compare single gpu llama to fsdp llama."""
-    vanilla_torch_output = _llama_vanilla_torch_run()
-
     fsdp_output = _llama_fsdp_run()
+
+    vanilla_torch_output = _llama_vanilla_torch_run()
     
     # Prune non-rank0 workers
     if len(fsdp_output) == 0:
@@ -97,7 +95,6 @@ def test_distributed_flex_model_fsdp():
         _LLAMA_VANILLA_TORCH_MODULES,
         _LLAMA_FSDP_MODULES,
     )
-    print(mapping)
     assert compare_tensor_dicts(vanilla_torch_output, fsdp_output, mapping)
 
     logger.info("Test successful!")
@@ -106,7 +103,7 @@ def test_distributed_flex_model_fsdp():
 # TODO: Be more consistent with logging messages
 def main():
     # Distributed config
-    os.environ["NCCL_DEBUG"] = "INFO"
+    #os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["NCCL_IB_DISABLE"] = "1"
 
     logger.info("Testing Huggingface llama-13b dual gpu...")

@@ -1,4 +1,4 @@
-from functools import partial
+from functools import partial, reduce
 import logging
 from typing import List, Tuple, Callable
 
@@ -39,77 +39,81 @@ def _get_activation_parallel_world_size() -> int:
     )
 
 
-def print_rank0(msg):
+def print_rank0(msg: str) -> None:
+    """Print to rank 0 worker."""
     if dist.is_initialized() and dist.get_rank() == 0:
         print(msg, flush=True)
 
 
-def _handle_activation_sharded(tensor: Tensor, shape: Tuple[int]) -> Tuple[Callable, Callable]:
-    """Get comm. collectives for sharded activation tensors."""
-    assert len(tensor.shape) == len(shape), f"Unequal shapes! {tensor.shape}, {shape}"
+def _get_different_dim(shape1: Tuple[int, ...], shape2: Tuple[int, ...]) -> int:
+    """Find non-matching dims."""
+    assert len(shape1) == len(shape2), "Shapes have different ndims"
 
-    # Find the sharded shape axis
-    diff = [i for i in range(len(tensor.shape)) if tensor.shape[i] != shape[i]]
-    assert len(diff) == 1, f"Multiple sharded axes found: {tensor.shape}, {shape}"
+    diff = [i for i in range(len(shape1)) if shape1[i] != shape2[i]]
+    assert len(diff) == 1, f"Multiple sharded axes found: {shape1}, {shape2}"
     sharded_dim = diff[0]
 
-    # Case1: Even sharding (chunked) - Assumed TP col parallel or DP
-    if shape[sharded_dim] % tensor.shape[sharded_dim] == 0:
-        collect_fn = partial(_gather_rank0_sync, axis=sharded_dim)
-        distribute_fn = partial(_scatter_rank0_sync, axis=sharded_dim)
-    
-    # Case2: Uneven sharding, need to keep track of where the split is - 
-    # Assumed uneven DP
-    else:
-        logger.info(f"Uneven sharding detected: {tensor.shape}, {shape}")
+    return sharded_dim
+
+
+def _parse_collect_and_distribute_from_tensor(tensor: Tensor, expected_shape: Tuple[int, ...]) -> Tuple[Callable, Callable]:
+    """Parse the activation tensor vs expected shape for distributed strategy."""
+    world_size = _get_activation_parallel_world_size()
+
+    # Single gpu fallback
+    if world_size == 1:
+        return _unity, _unity
+
+    # Make sure tensor ndims are same and sharding is valid
+    tensor_numel = tensor.numel()
+    expected_numel = reduce(lambda x, y: x * y, expected_shape)
+    assert tensor_numel in [expected_numel // world_size, expected_numel]
+    assert len(tensor.shape) == len(expected_shape)
+
+    is_sharded = tensor_numel != expected_numel
+
+    # Need to clone since all-reduce acts in-place
+    cmp_tensor = tensor.clone()
+    cmp_tensor = _all_reduce_sync(cmp_tensor)
+    same_data = torch.allclose(tensor * world_size, cmp_tensor)
+
+    # All ranks have replicated activations
+    if not is_sharded and same_data:
+        collect = _unity
+        disperse = _broadcast_rank0_sync
+
+    # Ranks have different activations
+    elif not is_sharded and not same_data:
+        # Case for partial sums resulting from RowParallel matmul
+        # TODO: Need to somehow undo the reduce
         raise NotImplementedError
 
-    return collect_fn, distribute_fn
-
-
-def _handle_activation_full(tensor: Tensor, shape: Tuple[int]) -> Tuple[Callable, Callable]:
-    """Get comm. collectives for full-rank activation tensors."""
-    
-    # Check if all ranks have the same tensor
-    world_size = _get_activation_parallel_world_size()
-    comparison_tensor = _all_reduce_sync(tensor)
-    same_tensor_data = torch.allclose(tensor * world_size, comparison_tensor)
-
-    # Same data, just use rank0 tensor - Assumed TP replicated
-    if same_tensor_data:
-        collect_fn = _unity
-
-    # Different data, need to reduce - Assumed TP row parallel partial prods
+    # Tensors are sharded along one dim
     else:
-        collect_fn = _reduce_rank0_sync
+        sharded_axis = _get_different_dim(tensor.shape, expected_shape)
 
-    distribute_fn = _broadcast_rank0_sync
+        collect = partial(_gather_rank0_sync, axis=sharded_axis)
+        disperse = partial(_scatter_rank0_sync, axis=sharded_axis)
 
-    return collect_fn, distribute_fn
+    return collect, disperse
 
 
-def _infer_collective(
-    tensor: Tensor,
-    shape: Tuple[int, ...]
-) -> Tuple[Callable, Callable]:
-    """
-    Given an actiation tensor and expected shape, infer the proper
-    comm. collective to materialize the true activation tensor.
-    """
-
-    # Activation tensor sharded along one dimension
-    if tensor.shape != shape:
-        collect_fn, distribute_fn = _handle_activation_sharded(tensor, shape)
-        
-    # Activation tensor is full-rank
+def _parse_edit_from_function(edit_function):
+    """Parse the user-provided editing function."""
+    if edit_function is None:
+        parsed_edit_function = _unity
     else:
-        collect_fn, distribute_fn = _handle_activation_full(tensor, shape)
-        
-    return collect_fn, distribute_fn
+        parsed_edit_function = edit_function
+    return parsed_edit_function
+
+
+def _parse_dump_from_function(dump_function):
+    """Parse the provided dump function."""
+    return dump_function
 
 
 def _unity(tensor: Tensor):
-    print_rank0(f"Unity | In: {tensor.shape}")
+    print_rank0(f"Unity | In:   {tensor.shape}")
     return tensor
 
 
@@ -124,7 +128,7 @@ def _broadcast_rank0_sync(
         async_op=False,
     )
 
-    print_rank0(f"Broadcast | In: {tensor.shape}")
+    print_rank0(f"Broadcast | In:   {tensor.shape}")
 
     return tensor
 
@@ -153,11 +157,10 @@ def _gather_rank0_sync(
     if torch.distributed.get_rank() != 0:
         return tensor
 
-    print_rank0(gather_list)
     output_tensor = torch.cat(gather_list, dim=axis)
     print_rank0(
-        f"Gather | In: {tensor.shape} Out: {output_tensor.shape} Dim: {axis} "
-        f"Collecting {len(gather_list)} chunks."
+        f"Gather | In:  {tensor.shape} -> {output_tensor.shape} Dim: {axis} "
+        f"Collecting: {len(gather_list)} chunks."
     )
 
     return output_tensor
@@ -231,8 +234,8 @@ def _scatter_rank0_sync(
         ))
 
         print_rank0(
-            f"Scatter | In: {tensor.shape} Out: {output_tensor.shape} Dim: {axis} "
-            f"Sending {len(scatter_list)} chunks."
+            f"Scatter | In:     {tensor.shape} -> {output_tensor.shape} Dim: {axis} "
+            f"Sending: {len(scatter_list)} chunks."
         )
 
     else:

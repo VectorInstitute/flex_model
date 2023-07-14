@@ -22,7 +22,9 @@ from torch import Tensor
 from flex_model._distributed_utils import (
     print_rank0,
     _set_activation_group,
-    _infer_collective
+    _parse_collect_and_distribute_from_tensor,
+    _parse_edit_from_function,
+    _parse_dump_from_function,
 )
 from flex_model._common_utils import (
     _FlexModelState,
@@ -70,53 +72,15 @@ class HookFunction(_HookFunctionState):
         editing_function: Optional[Callable] = lambda x: x,
     ) -> None:
         _init_distributed_function_state(self)
-
         _init_core_function_state(
             self,
             module_name,
             expected_shape,
             editing_function,
         )
-
         _init_runtime_function_state(self)
 
-    def _pre_distributed_collect_rearrange(self, tensor: Tensor) -> Tensor:
-        pass
-
-    def _post_distributed_collect_rearrange(self, tensor: Tensor) -> Tensor:
-        pass
-        
-    def _distributed_collect(self, tensor: Tensor) -> Tensor:
-        """Applies appropriate comm. collective to put tensor on rank0."""
-        if self._collect_function is None:
-            collect_fn, distribute_fn = _infer_collective(
-                tensor,
-                self.expected_shape,
-            )
-            self._collect_fn_cache = collect_fn
-            self._distribute_fn_cache = distribute_fn
-
-        print_rank0(f"Pre-collect shape:    {tensor.shape}")
-
-        return self._collect_fn_cache(tensor)
-
-    def _pre_distributed_disperse_rearrange(self, tensor: Tensor) -> Tensor:
-        pass
-
-    def _post_distributed_disperse_rearrange(self, tensor: Tensor) -> Tensor:
-        pass
-
-    def _distributed_disperse(self, tensor: Tensor) -> Tensor:
-        """Applies appropriate comm. collective to redistribute the collected
-        tensor.
-        """
-        assert self._distribute_fn_cache is not None
-
-        print_rank0(f"Pre-redistribute shape: {tensor.shape}")
-
-        return self._distribute_fn_cache(tensor)
-
-    def _parse_out_tensor(
+    def _unpack_layer_outputs(
         self,
         outputs: Union[LayerOutputs, Tensor],
     ) -> Tuple[Tensor, partial, torch.Size]:
@@ -129,70 +93,54 @@ class HookFunction(_HookFunctionState):
 
         start_shape = tensor.size()
 
-        # TODO: Pull knowledge of dist state out into flex model only
-        if self._using_torch_distributed:
-            tensor = self._distributed_collect(tensor)
-
-        # Define undo function to re-pack the edited activation tensor
         # TODO: Typecheck
         def _repack(
-            _treedef,
-            _leaves,
-            _edited_tensor,
+            _treedef, _leaves, _edited_tensor,
         ) -> Union[LayerOutputs, torch.Size]:
             """Pack activation tensor back into layer output container."""
-            if self._using_torch_distributed:
-                _edited_tensor = self._distributed_disperse(_edited_tensor)
-
             end_shape = _edited_tensor.size()
-
             layer_outputs = _unflatten(_treedef, [_edited_tensor] + _leaves)
-
             return layer_outputs, end_shape
 
         return tensor, partial(_repack, treedef, other_leaves), start_shape
 
-    def _rearrange(
-        self,
-        activation: Tensor,
-    ) -> Tuple[Tensor, Callable]:
-        """
-        Reshape a tensor, and return it alongside the inverse of the reshape.
-        """
-
-        original_shape = activation.shape
-        # Given current shape or shape not specified
-        if (original_shape == self.expected_shape or
-            self.expected_shape is None):
-            return activation, lambda y: y
-
-        def _undo(_tensor, _shape):
-            _tensor = _tensor.reshape(*_shape)
-            return _tensor
-
-        activation = activation.reshape(*self.expected_shape)
-
-        print_rank0(f"Post-rearrange shape: {activation.shape}")
-        undo_fn = partial(_undo, _shape=original_shape)
-        return activation, undo_fn
-
-    def _edit(
-        self,
-        activation: Tensor,
-    ) -> Tensor:
-        """Apply editing function to activation tensor."""
-        if self.editing_function is None:
-            return activation
-        else:
-            return self.editing_function(activation)
-
-    def _bind_tensor_to_output(
-        self,
-        activation: Tensor,
-    ) -> None:
+    def _bind_tensor_to_cpu_output(self, activation: Tensor) -> None:
         """Bind the activation tensor to the output dict."""
         assert self._output_ptr is not None
         self._output_ptr[self.module_name] = activation.detach().cpu()
+
+    def _parse_tensor(self, tensor: Tensor) -> None:
+        self._collect, self._disperse = _parse_collect_and_distribute_from_tensor(
+            tensor, self.expected_shape,
+        )
+        self._edit = _parse_edit_from_function(self.editing_function)
+        self._dump = _parse_dump_from_function(self._bind_tensor_to_cpu_output)
+        
+    def _hook_function_template(
+        self,
+        module: nn.Module,
+        inputs: Union[LayerOutputs, Tensor],
+        outputs: Union[LayerOutputs, Tensor],
+    ) -> Optional[LayerOutputs]:
+        """Internal template for hook function."""
+        print_rank0(f"{self.module_name}: Hook function activated")
+        tensor, _repack_layer_outputs, start_shape = self._unpack_layer_outputs(
+            outputs,
+        )
+
+        if self._collect is None and self._disperse is None:
+            self._parse_tensor(tensor)
+
+        tensor = self._collect(tensor)
+        tensor = self._edit(tensor)
+        self._dump(tensor)
+        tensor = self._disperse(tensor)
+
+        outputs, end_shape = _repack_layer_outputs(tensor)
+
+        assert start_shape == end_shape
+
+        return outputs
 
     def hook_function(
         self,
@@ -200,46 +148,8 @@ class HookFunction(_HookFunctionState):
         inputs: Union[LayerOutputs, Tensor],
         outputs: Union[LayerOutputs, Tensor],
     ) -> Optional[LayerOutputs]:
-        """Hook function implementation passed to PyTorch."""
-        print_rank0(
-            ("*" * 10) +
-            f"Module {self.module_name} - Hook function activated" +
-            ("*" * 10)
-        )
-
-        # Parse layer outputs
-        tensor, repack_fn, start_shape = self._parse_out_tensor(outputs)
-
-        # Only rank0 gets the full activation tensor. Other ranks get their
-        # corresponding tensor shards. This is useful when it comes to broadcast/
-        # scatter outputs.
-        if (torch.distributed.is_initialized() and
-             torch.distributed.get_rank() == 0 or
-             not torch.distributed.is_initialized()):
-            # Rearrange
-            print_rank0(f"Pre-rearrange shape:  {tensor.shape}")
-            tensor, undo_rearrange_fn = self._rearrange(tensor)
-            print_rank0(f"Post-rearrange shape: {tensor.shape}")
-
-            # Edit
-            tensor = self._edit(tensor)
-
-            # Bind copy to output dict
-            self._bind_tensor_to_output(tensor)
-
-            # Undo rearrange
-            print_rank0(f"Pre-undo shape:       {tensor.shape}")
-            tensor = undo_rearrange_fn(tensor)
-            print_rank0(f"Post-undo shape:      {tensor.shape}")
-
-        # All ranks participate in repacking (broadcast/scatter included), implicit
-        # barrier here.
-        outputs, end_shape = repack_fn(tensor)
-
-        assert start_shape == end_shape, (f"Rank{torch.distributed.get_rank()}"
-                                          f" Unmatching I/O shapes: "
-                                          f"{start_shape} - {end_shape}")
-
+        """Public API for hook function."""
+        outputs = self._hook_function_template(module, inputs, outputs)
         return outputs
 
 

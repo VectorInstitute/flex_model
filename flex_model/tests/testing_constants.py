@@ -27,7 +27,7 @@ _LLAMA_FSDP_MODULES = {
     "_fsdp_wrapped_module.model.layers.5._fsdp_wrapped_module.self_attn": (3, 11, 5120),
     "_fsdp_wrapped_module.model.layers.6._fsdp_wrapped_module.self_attn.o_proj": (3, 11, 5120),
     #"_fsdp_wrapped_module.model.layers.2._fsdp_wrapped_module.mlp.act_fn",
-    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.self_attn.v_proj": (3, 11, 40, 5120),
+    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.self_attn.v_proj": (3, 11, 5120),
     "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.self_attn.k_proj": (3, 11, 5120),
     "_fsdp_wrapped_module.model.layers.8._fsdp_wrapped_module.self_attn.q_proj": (3, 11, 5120),
     "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.post_attention_layernorm": (3, 11, 5120),

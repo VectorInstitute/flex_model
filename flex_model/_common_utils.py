@@ -79,8 +79,10 @@ class _HookFunctionState(_State):
         self.editing_function: Optional[Callable]
         self._using_torch_distributed: bool
         self._using_accelerate_distributed: bool
-        self._collect_function: Optional[Callable]
-        self._distribute_function: Optional[Callable]
+        self._collect: Optional[Callable]
+        self._disperse: Optional[Callable]
+        self._edit: Optional[Callable]
+        self._dump: Optional[Callable]
         self._output_ptr: Optional[Dict[str, Tensor]]
 
 
@@ -121,8 +123,10 @@ def _init_core_function_state(
 def _init_runtime_function_state(
     state: _HookFunctionState,
 ) -> _HookFunctionState:
-    state._collect_function = None
-    state._distribute_function = None
+    state._collect = None
+    state._disperse = None
+    state._edit = None
+    state._dump = None
     state._output_ptr = None
     return state
 
