@@ -34,6 +34,9 @@ def _get_activation_parallel_group() -> dist.ProcessGroup:
 
 def _get_activation_parallel_world_size() -> int:
     """Return global activation processes world size."""
+    if not dist.is_initialized():
+        return 1
+
     return dist.get_world_size(
         group=_get_activation_parallel_group(),
     )

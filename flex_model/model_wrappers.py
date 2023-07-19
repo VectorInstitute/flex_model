@@ -107,7 +107,8 @@ class HookFunction(_HookFunctionState):
     def _bind_tensor_to_cpu_output(self, activation: Tensor) -> None:
         """Bind the activation tensor to the output dict."""
         assert self._output_ptr is not None
-        self._output_ptr[self.module_name] = activation.detach().cpu()
+        dumped_tensor = activation.detach().cpu().reshape(*self.expected_shape)
+        self._output_ptr[self.module_name] = dumped_tensor
 
     def _parse_tensor(self, tensor: Tensor) -> None:
         self._collect, self._disperse = _parse_collect_and_distribute_from_tensor(
@@ -123,7 +124,7 @@ class HookFunction(_HookFunctionState):
         outputs: Union[LayerOutputs, Tensor],
     ) -> Optional[LayerOutputs]:
         """Internal template for hook function."""
-        print_rank0(f"{self.module_name}: Hook function activated")
+        print_rank0(f"*{self.module_name}: Hook function activated*")
         tensor, _repack_layer_outputs, start_shape = self._unpack_layer_outputs(
             outputs,
         )
@@ -132,8 +133,11 @@ class HookFunction(_HookFunctionState):
             self._parse_tensor(tensor)
 
         tensor = self._collect(tensor)
-        tensor = self._edit(tensor)
-        self._dump(tensor)
+
+        if torch.distributed.get_rank() == 0:
+            tensor = self._edit(tensor)
+            self._dump(tensor)
+
         tensor = self._disperse(tensor)
 
         outputs, end_shape = _repack_layer_outputs(tensor)

@@ -19,9 +19,10 @@ def setup_model_parallel() -> Tuple[int, int]:
     nnodes = int(os.environ.get("SLURM_JOB_NUM_NODES", -1))
     world_size = nnodes * num_gpus
 
-    torch.distributed.init_process_group("nccl")
+    if not dist.is_initialized():
+        dist.init_process_group("nccl")
     initialize_model_parallel(world_size)
-    global_rank = torch.distributed.get_rank()
+    global_rank = dist.get_rank()
     torch.cuda.set_device(local_rank)
 
     # seed must be the same in all processes

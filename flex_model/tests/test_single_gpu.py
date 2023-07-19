@@ -11,7 +11,6 @@ from torch import Tensor
 from flex_model.model_wrappers import FlexModel
 from flex_model._traverse_utils import (
     _recursively_find_first_tensor,
-    print_rank0,
     _flatten,
     _unflatten,
 )
@@ -42,7 +41,7 @@ def test_simple_model():
 
     # Vanilla pytorch forward hooks
     logger.info("Running base forward hooks")
-    test_base_dict = apply_torch_fwd_hooks(
+    test_base_dict, _ = apply_torch_fwd_hooks(
         model,
         inputs,
         module_names_with_shapes,
@@ -51,68 +50,16 @@ def test_simple_model():
     # Flex model forward hooks
     logger.info("Running flex model forward hooks")
     
-    test_flex_dict = apply_flex_model_fwd_hooks(
+    test_flex_dict, _ = apply_flex_model_fwd_hooks(
         model,
         inputs,
         module_names_with_shapes,
     )
 
-    # Shape dumped is different, reshape back for comparison
-    test_flex_dict["fc1"] = test_flex_dict["fc1"].reshape(8, 4, 16 * 4)
-
     # Correctness check
-    assert compare_tensor_dicts(test_base_dict, test_flex_dict)
-
-
-
-# NOTE: Deprecated
-def test_huggingface_opt_model():
-    model, tokenizer = get_opt_125m()
-
-    prompt = "Hi I'm Matt, where am I?"
-    inputs = tokenizer(prompt, return_tensors="pt")
-
-    # Regular forward pass
-    outputs = model.forward(inputs.input_ids)
-
-    # Test forward hooks
-    module_names = [
-        "model.decoder.layers.5.self_attn",
-        "model.decoder.layers.6.self_attn.out_proj",
-        "model.decoder.layers.2.activation_fn",
-        "model.decoder.layers.7.self_attn.v_proj",
-        "model.decoder.layers.11.self_attn.k_proj",
-        "model.decoder.layers.8.self_attn.q_proj",
-        "model.decoder.layers.11.self_attn_layer_norm",
-        "model.decoder.layers.7.fc1",
-        "model.decoder.embed_tokens",
-        "model.decoder.embed_positions",
-        "model",
-        "model.decoder",
-        "model.decoder.layers",
-        "model.decoder.layers.7" "model.decoder.layers.11.fc2",
-        "lm_head",
-    ]
-    module_shapes = [None for n in range(len(module_names))]
-
-    logger.info("Running base forward hooks")
-    test_base_dict = apply_torch_fwd_hooks(
-        model,
-        inputs.input_ids,
-        module_names,
-        module_shapes,
-        parse_base_model_output_with_past,
-    )
-
-    logger.info("Running flex model forward hooks")
-    test_flex_dict = apply_flex_model_fwd_hooks(
-        model,
-        inputs.input_ids,
-        module_names,
-        module_shapes,
-    )
-
-    assert compare_tensor_dicts(test_base_dict, test_flex_dict)
+    for (n1, a1), (n2, a2) in zip(test_base_dict.items(), test_flex_dict.items()):
+        assert n1 == n2
+        assert torch.allclose(a1, a2)
 
 
 def test_traversal_utils():
@@ -157,10 +104,6 @@ def main():
     logger.info("Testing traversal/parse utils...")
     test_traversal_utils()
     logger.info("Test successful!")
-
-    #logger.info("Testing Huggingface OPT-125m single gpu...")
-    #test_huggingface_opt_model()
-    #logger.info("Test successful!")
 
 
 if __name__ == "__main__":
