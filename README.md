@@ -1,13 +1,15 @@
 # Installation
 Run `pip install -e .` from the root directory.
 
-# Important Note
-Testing the correctness of the fairscale llama activations is still a WIP. The
+# Important Notes
+- Testing the correctness of the fairscale llama activations is still a WIP. The
 huggingface llama model implementation is slightly different, especially when
-it comes to the RoPE positional embedding implementations.
+it comes to the RoPE positional embedding implementations. Future tests will 
+compare between non-distributed and distributed versions of the models.
 
-Future tests will just compare between non-distributed and distributed
-versions of the models.
+- Make sure to replace any instances of `module.forward(inputs)` with
+`module(inputs)`. The forward hooks are not run if you directly call
+the forward function of a module (this is the case with LLaMA).
 
 # Usage
 Here's a short example on how you would use the FlexModel and HookFunction
