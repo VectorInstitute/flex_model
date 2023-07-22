@@ -36,7 +36,7 @@ def test_simple_model():
 
     # Test forward hooks
     module_names_with_shapes = {
-        "fc1": (8 * 4, 16 * 4),
+        "fc1": (8, 4, 16 * 4),
     }
 
     # Vanilla pytorch forward hooks

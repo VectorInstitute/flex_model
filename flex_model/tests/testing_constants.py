@@ -24,7 +24,7 @@ _LLAMA_VANILLA_TORCH_MODULES = {
 
 _FSDP_PREFIX = "_fsdp_wrapped_module."
 _LLAMA_FSDP_MODULES = {
-    "_fsdp_wrapped_module.model.layers.5._fsdp_wrapped_module.self_attn": (3, 11, 5120),
+    "_fsdp_wrapped_module.model.layers.5._fsdp_wrapped_module.self_attn": (None, None, 5120),
     "_fsdp_wrapped_module.model.layers.6._fsdp_wrapped_module.self_attn.o_proj": (3, 11, 5120),
     #"_fsdp_wrapped_module.model.layers.2._fsdp_wrapped_module.mlp.act_fn",
     "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.self_attn.v_proj": (3, 11, 5120),
@@ -44,14 +44,14 @@ _LLAMA_FSDP_MODULES = {
 
 _LLAMA_MEGATRON_MODULES = {
     "layers.5.attention": (3, 11, 5120),
-    "layers.6.attention.wo": (3, 11, 5120),
-    "layers.7.attention.wv": (3, 11, 5120),
-    "layers.11.attention.wk": (3, 11, 5120),
-    "layers.8.attention.wq": (3, 11, 5120),
+    "layers.6.attention.wo": (None, None, 5120),
+    "layers.7.attention.wv": (None, None, 5120),
+    "layers.11.attention.wk": (None, None, 5120),
+    "layers.8.attention.wq": (None, None, 5120),
     "layers.11.ffn_norm": (3, 11, 5120),
     "layers.7.feed_forward": (3, 11, 5120),
-    "layers.7.feed_forward.w1": (3, 11, 13824),
-    "layers.28.feed_forward.w3": (3, 11, 13824),
+    "layers.7.feed_forward.w1": (None, None, 13824),
+    "layers.28.feed_forward.w3": (None, None, 13824),
     "layers.9.feed_forward.w2": (3, 11, 5120),
     "tok_embeddings": (3, 11, 5120),
     #"output": (3, 11, 13824),

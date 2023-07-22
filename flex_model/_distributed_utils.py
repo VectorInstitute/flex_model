@@ -1,6 +1,6 @@
 from functools import partial, reduce
 import logging
-from typing import List, Tuple, Callable
+from typing import List, Tuple, Callable, Optional
 
 import torch
 import torch.distributed as dist
@@ -59,9 +59,38 @@ def _get_different_dim(shape1: Tuple[int, ...], shape2: Tuple[int, ...]) -> int:
     return sharded_dim
 
 
+def _autofill_expected_shape(
+    tensor: Tensor,
+    expected_shape: Tuple[Optional[int], ...]
+) -> Tuple[int, ...]:
+    """
+    Fill in unspecified dimensions in the expected shape of the full-size
+    activation.
+    """
+    tensor_shape = tensor.shape
+    assert len(tensor_shape) == len(expected_shape), (
+        f"Shape have different ndims: {len(tensor_shape)}, {len(expected_shape)}")
+
+    # Expected shape contains None dimensions because it's annoying for the
+    # user to know them exactly (ie. seq len after tokenization). Hence we will
+    # infer them from the activation tensor.
+    filled_shape = tuple(
+        d1
+        if d2 is None
+        else d2
+        for d1, d2 in zip(tensor_shape, expected_shape)
+    )
+    print_rank0(f"Inferring shape: User-{expected_shape}, Inferred-"
+                f"{filled_shape}")
+    return filled_shape
+
+
 def _parse_collect_and_distribute_from_tensor(tensor: Tensor, expected_shape: Tuple[int, ...]) -> Tuple[Callable, Callable]:
     """Parse the activation tensor vs expected shape for distributed strategy."""
     world_size = _get_activation_parallel_world_size()
+
+    # Handle unspecified dimensions
+    expected_shape = _autofill_expected_shape(tensor, expected_shape)
 
     # Single gpu fallback
     if world_size == 1:

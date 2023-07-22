@@ -32,11 +32,15 @@ model = FlexModel(model, output_dict)
 #		tensor, else you'll have to do it manually.
 inputs = tokenizer(...)
 
+# Only need to provide a shape hint on the dimension which may be sharded
+# across gpus.
+expected_shape = (None, None, 13824)
+
 # Hook function requires a module to retrieve outputs from, the expected shape
 # of the activation, and optionally an editing function.
 hook_function = HookFunction(
 	module_name="layers.7.feed_forward.w1",
-	expected_shape=(...),	# BxSxH, infer this from inputs tensor
+	expected_shape=expected_shape,
 	editing_function=lambda x: x * 2,
 )
 

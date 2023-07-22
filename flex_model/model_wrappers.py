@@ -107,7 +107,7 @@ class HookFunction(_HookFunctionState):
     def _bind_tensor_to_cpu_output(self, activation: Tensor) -> None:
         """Bind the activation tensor to the output dict."""
         assert self._output_ptr is not None
-        dumped_tensor = activation.detach().cpu().reshape(*self.expected_shape)
+        dumped_tensor = activation.detach().cpu() #.reshape(*self.expected_shape)
         self._output_ptr[self.module_name] = dumped_tensor
 
     def _parse_tensor(self, tensor: Tensor) -> None:
@@ -134,7 +134,9 @@ class HookFunction(_HookFunctionState):
 
         tensor = self._collect(tensor)
 
-        if torch.distributed.get_rank() == 0:
+        if not torch.distributed.is_initialized() or (
+            torch.distributed.is_initialized() and
+                torch.distributed.get_rank() == 0):
             tensor = self._edit(tensor)
             self._dump(tensor)
 
