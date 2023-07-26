@@ -14,14 +14,16 @@ logger = logging.getLogger(__name__)
 
 def _set_activation_group(ranks: List[int]) -> None:
     """Given a list of ranks, initialize a new `ProcessGroup`"""
+    global _GLOBAL_ACTIVATION_GROUP
+
     assert torch.distributed.get_world_size() >= len(ranks)
+    assert _GLOBAL_ACTIVATION_GROUP is None
 
     act_proc_group = dist.new_group(
         ranks=ranks,
         backend="nccl",
     )
 
-    global _GLOBAL_ACTIVATION_GROUP
     _GLOBAL_ACTIVATION_GROUP = act_proc_group
 
 

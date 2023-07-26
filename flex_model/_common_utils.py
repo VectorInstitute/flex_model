@@ -9,10 +9,12 @@ from typing import (
 import accelerate
 import torch
 from torch import Tensor
+import torch.nn as nn
 
 from flex_model._distributed_utils import (
     _set_activation_group,
     _get_activation_parallel_group,
+    _get_activation_parallel_world_size,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,12 +47,13 @@ class _FlexModelState(_State):
     """
     def __init__(self) -> None:
         from flex_model.model_wrappers import HookFunction # For typing
-        self.output_ptr: Dict[str, Tensor]
+        self.output_ptr: Dict[str, Tensor] = {}
         self.rank: int = -1
         self.world_size: int = -1
         self.process_group: Optional[torch.distributed.ProcessGroup] = None
         self.compute_device: Optional[torch.device] = None
-        self.hook_fns: Dict[str, HookFunction]
+        self.hook_fns: Dict[str, HookFunction] = {}
+        self.hook_trainable_modules: nn.ModuleDict = nn.ModuleDict()
         self._hook_fn_handles: Dict[str, torch.utils.hooks.RemovableHandle] = {}
 
 
@@ -140,7 +143,7 @@ def _init_distributed_model_state(
 
     if (
             not torch.distributed.is_initialized() and 
-            not _accelerate_distributed_is_initialized()
+            _accelerate_distributed_is_initialized()
     ):
         logger.info(("*" * 10) + "NOT USING DISTRIBUTED FEATURES" + ("*" * 10))
         state.rank = 0
@@ -150,12 +153,18 @@ def _init_distributed_model_state(
     logger.info(("*" * 10) + "DISTRIBUTED FEATURES ENABLED" + ("*" * 10))
 
     state.rank = torch.distributed.get_rank()
-    state.world_size = torch.distributed.get_world_size()
 
     # Default to all workers for activation group
-    _set_activation_group(list(range(state.world_size)))
+    # TODO: Make this configurable (prevent collision with other groups)
+    _set_activation_group(list(range(torch.distributed.get_world_size())))
 
+    state.world_size = _get_activation_parallel_world_size()
     state.process_group = _get_activation_parallel_group()
+
+    logger.info(
+        f"Distributed activations initialized with params: "
+        f"[rank{state.rank}] - world_size={state.world_size}"
+    )
 
     return state
 
@@ -165,7 +174,6 @@ def _init_core_model_state(
     output_ptr: Dict[str, Tensor],
 ) -> _FlexModelState:
     state.output_ptr = output_ptr
-
     return state
 
 
@@ -174,4 +182,5 @@ def _init_runtime_model_state(
 ) -> _FlexModelState:
     state._hook_fn_handles = {}
     state.hook_fns = {}
+    state.hook_trainable_modules = nn.ModuleDict()
     return state

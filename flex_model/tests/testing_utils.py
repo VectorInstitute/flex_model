@@ -45,8 +45,11 @@ def parse_base_model_output_with_past(x):
     return x
 
 
-def dummy_editing_fn_with_log(x):
-    print_rank0(f"Running dummy editing function")
+def dummy_editing_fn_with_log(x, hook_trainable_modules):
+    logger.info(
+        f"Running dummy editing function with hook modules: "
+        f"{hook_trainable_modules}"
+    )
     return x
 
 

@@ -21,7 +21,6 @@ from torch import Tensor
 
 from flex_model._distributed_utils import (
     print_rank0,
-    _set_activation_group,
     _parse_collect_and_distribute_from_tensor,
     _parse_edit_from_function,
     _parse_dump_from_function,
@@ -122,6 +121,7 @@ class HookFunction(_HookFunctionState):
         module: nn.Module,
         inputs: Union[LayerOutputs, Tensor],
         outputs: Union[LayerOutputs, Tensor],
+        _hook_trainable_modules: nn.ModuleDict,
     ) -> Optional[LayerOutputs]:
         """Internal template for hook function."""
         print_rank0(f"*{self.module_name}: Hook function activated*")
@@ -137,8 +137,12 @@ class HookFunction(_HookFunctionState):
         if not torch.distributed.is_initialized() or (
             torch.distributed.is_initialized() and
                 torch.distributed.get_rank() == 0):
-            tensor = self._edit(tensor)
+
+            # Dump then edit: See V-composition analysis algo
             self._dump(tensor)
+
+            # Edit function API: Tensor edit_fn (Tensor, hook_trainable_modules)
+            tensor = self._edit(tensor, _hook_trainable_modules)
 
         tensor = self._disperse(tensor)
 
@@ -153,9 +157,20 @@ class HookFunction(_HookFunctionState):
         module: nn.Module,
         inputs: Union[LayerOutputs, Tensor],
         outputs: Union[LayerOutputs, Tensor],
+        _hook_trainable_modules: nn.ModuleDict,
     ) -> Optional[LayerOutputs]:
-        """Public API for hook function."""
-        outputs = self._hook_function_template(module, inputs, outputs)
+        """Public API for hook function.
+
+        Hook function that the `FlexModel` will register and apply. Underscored
+        parameters are not included in the public API for torch hooks and are
+        partial'd out.
+        """
+        outputs = self._hook_function_template(
+            module,
+            inputs,
+            outputs,
+            _hook_trainable_modules,
+        )
         return outputs
 
 
@@ -198,7 +213,18 @@ class FlexModel(nn.Module, _FlexModelState):
     ) -> None:
         """Given user hook reqest, generate hook function and store it."""
         hook_function._output_ptr = self.output_ptr
-        self.hook_fns[hook_function.module_name] = hook_function
+        hook_fn_to_reg = partial(
+            hook_function.hook_function,
+            _hook_trainable_modules=self.hook_trainable_modules,
+        )
+        self.hook_fns[hook_function.module_name] = hook_fn_to_reg
+
+    def register_hook_trainable_module(
+        self,
+        name: str,
+        submodule: nn.Module
+    ) -> None:
+        self.hook_trainable_modules[name] = submodule
 
     @contextmanager
     def _hook(self) -> Generator:
@@ -208,7 +234,7 @@ class FlexModel(nn.Module, _FlexModelState):
         for name, module in self.module.named_modules():
             if name in self.hook_fns:
                 _handle = module.register_forward_hook(
-                    self.hook_fns[name].hook_function
+                    self.hook_fns[name]
                 )
                 self._hook_fn_handles[name] = _handle
 
@@ -221,6 +247,15 @@ class FlexModel(nn.Module, _FlexModelState):
             for hook in self._hook_fn_handles.values():
                 hook.remove()
         self._hook_fn_handles.clear()
+
+    def module_names(self) -> List[str]:
+        return [n for n, _ in self.module.named_modules()]
+
+    def parameter_names(self) -> List[str]:
+        return [n for n, _ in self.module.named_parameters()]
+
+    def get_parameter(self, module_name):
+        NotImplementedError
 
     def forward(self, *args, **kwargs) -> Any:
         """Run forward of wrapped model."""
