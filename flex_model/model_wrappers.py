@@ -226,11 +226,7 @@ class FlexModel(nn.Module, _FlexModelState):
     ) -> None:
         self.hook_trainable_modules[name] = submodule
 
-    @contextmanager
-    def _hook(self) -> Generator:
-        """Context manager for applying forward hooks."""
-        # TODO: Calling module.forward doesn't run forward hooks. Is there a
-        #       way to force the call to module.__call__ instead?
+    def set_hooks(self) -> None:
         for name, module in self.module.named_modules():
             if name in self.hook_fns:
                 _handle = module.register_forward_hook(
@@ -240,13 +236,23 @@ class FlexModel(nn.Module, _FlexModelState):
 
                 print_rank0(f"Installing module: {name} forward hook")
 
+    def remove_hooks(self) -> None:
+        for hook in self._hook_fn_handles.values():
+            hook.remove()
+
+        self._hook_fn_handles.clear()
+
+    @contextmanager
+    def _hook(self) -> Generator:
+        """Context manager for applying forward hooks."""
+        # TODO: Calling module.forward doesn't run forward hooks. Is there a
+        #       way to force the call to module.__call__ instead?
+        self.set_hooks()
         try:
             yield
 
         finally:
-            for hook in self._hook_fn_handles.values():
-                hook.remove()
-        self._hook_fn_handles.clear()
+            self.remove_hooks()
 
     def module_names(self) -> List[str]:
         return [n for n, _ in self.module.named_modules()]

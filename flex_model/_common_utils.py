@@ -142,8 +142,8 @@ def _init_distributed_model_state(
     )
 
     if (
-            not torch.distributed.is_initialized() and 
-            _accelerate_distributed_is_initialized()
+            not torch.distributed.is_initialized() and
+            not _accelerate_distributed_is_initialized()
     ):
         logger.info(("*" * 10) + "NOT USING DISTRIBUTED FEATURES" + ("*" * 10))
         state.rank = 0
