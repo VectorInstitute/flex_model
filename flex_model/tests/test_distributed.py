@@ -39,6 +39,7 @@ def _llama_vanilla_torch_run() -> Dict[str, Tensor]:
     model, tokenize_fn = get_llama_13b_hf()
 
     inputs = tokenize_fn(_PROMPTS).cuda()
+    logger.info(f"Rank{torch.distributed.get_rank()} inputs: {inputs}")
 
     output_dict, outputs = apply_torch_fwd_hooks(
         model=model,

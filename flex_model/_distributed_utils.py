@@ -102,8 +102,8 @@ def _parse_collect_and_distribute_from_tensor(tensor: Tensor, expected_shape: Tu
     tensor_numel = tensor.numel()
     expected_numel = reduce(lambda x, y: x * y, expected_shape)
     assert tensor_numel in [expected_numel // world_size, expected_numel], (
-        f"tensor: {tensor_numel}, expected: {expected_numel} or "
-        f"{expected_numel // world_size}")
+        f"tensor: {tensor.shape}, expected: {expected_shape} or sharded version"
+    )
     assert len(tensor.shape) == len(expected_shape)
 
     is_sharded = tensor_numel != expected_numel

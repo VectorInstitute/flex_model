@@ -88,7 +88,8 @@ def compare_tensor_dicts(
                 #print_rank0(act2)
 
             else:
-                logger.info(f"Allclose PASSED for {name1} - {name2}")
+                logger.info(f"Allclose PASSED for {name1} - {name2}. "
+                            f"Max diff: {torch.abs(act1-act2).max()}")
         return True
 
 
@@ -121,21 +122,20 @@ def get_opt_125m():
 
 
 def get_llama_13b_hf():
-    model = LlamaForCausalLM.from_pretrained(
-        "/ssd005/projects/llm/llama/LLaMA/13B_hf_converted",
-        #"/scratch/ssd002/projects/opt_test/llama-13b-hf",
+    model = AutoModelForCausalLM.from_pretrained(
+        "/ssd005/projects/llm/llama-2-13b-hf",
         local_files_only=True,
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
     ).cuda()
-    tokenizer = LlamaTokenizer.from_pretrained(
-        "/ssd005/projects/llm/llama/LLaMA/13B_hf_converted",
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        "/ssd005/projects/llm/llama-2-13b-hf",
         #"/scratch/ssd002/projects/opt_test/llama-13b-hf",
         local_files_only=True,
     )
     tokenizer.pad_token_id=0
-    tokenizer.bos_token_id=1
-    tokenizer.eos_token_id=2
+    tokenizer.padding_side="right"
 
     def tokenize(ps):
         return tokenizer(ps, padding=True, return_tensors="pt")["input_ids"]
@@ -144,28 +144,25 @@ def get_llama_13b_hf():
 
 
 def get_llama_13b_megatron():
-    from flex_model.tests._llama_megatron_utils import load_llama, setup_model_parallel
-
-    local_rank, world_size = setup_model_parallel()
-
-    model, _ = load_llama(
-        local_rank=local_rank,
-        world_size=world_size,
+    from llama import Llama
+    generator = Llama.build(
+        ckpt_dir="/ssd005/projects/llm/llama-2-13b",
+        tokenizer_path="/ssd005/projects/llm/llama-2-13b/tokenizer.model",
         max_seq_len=512,
         max_batch_size=32,
-        ckpt_dir="/ssd005/projects/llm/llama/LLaMA/13B",
-        tokenizer_path="/ssd005/projects/llm/llama/LLaMA/tokenizer.model",
     )
-    tokenizer = LlamaTokenizer.from_pretrained(
-        "/scratch/ssd002/projects/opt_test/llama-13b-hf",
-        local_files_only=True,
-    )
-    tokenizer.pad_token_id=0
-    tokenizer.bos_token_id=1
-    tokenizer.eos_token_id=2
+    model = generator.model
+    tokenizer = generator.tokenizer
 
-    def tokenize(ps):
-        return tokenizer(ps, padding=True, return_tensors="pt")["input_ids"]
+    def tokenize(prompts):
+        input_tokens = [generator.tokenizer.encode(x, bos=True, eos=False) for x in prompts]
+        bsz = len(input_tokens)
+        total_len = max(len(t) for t in input_tokens)
+        pad_id = 0
+        tokens = torch.full((bsz, total_len), pad_id, dtype=torch.long, device="cuda")
+        for k, t in enumerate(input_tokens):
+            tokens[k, : len(t)] = torch.tensor(t, dtype=torch.long, device="cuda")
+        return tokens
 
     return model, tokenize
 
