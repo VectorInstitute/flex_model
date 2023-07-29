@@ -141,8 +141,8 @@ class HookFunction(_HookFunctionState):
             # Dump then edit: See V-composition analysis algo
             self._dump(tensor)
 
-            # Edit function API: Tensor edit_fn (Tensor, hook_trainable_modules)
-            tensor = self._edit(tensor, _hook_trainable_modules)
+        # Edit function API: Tensor edit_fn (Tensor, hook_trainable_modules)
+        tensor = self._edit(tensor, _hook_trainable_modules)
 
         tensor = self._disperse(tensor)
 

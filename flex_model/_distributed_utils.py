@@ -175,28 +175,23 @@ def _gather_rank0_sync(
 ) -> Tensor:
     """Syncronous gather onto rank0."""
     world_size = _get_activation_parallel_world_size()
+    if world_size == 1:
+        return tensor
 
-    if torch.distributed.get_rank() == 0:
-        gather_list = [torch.empty_like(tensor) for _ in range(world_size)]
-    else:
-        gather_list = None
+    tensor_list = [torch.empty_like(tensor) for _ in range(world_size)]
+    tensor_list[dist.get_rank()] = tensor
 
-    dist.gather(
-        tensor=tensor,
-        gather_list=gather_list,
-        dst=0,
+    dist.all_gather(
+        tensor_list,
+        tensor,
         group=_get_activation_parallel_group(),
         async_op=False,
     )
 
-    # Non-rank0 workers can return and wait until hook exit
-    if torch.distributed.get_rank() != 0:
-        return tensor
-
-    output_tensor = torch.cat(gather_list, dim=axis)
+    output_tensor = torch.cat(tensor_list, dim=axis)
     print_rank0(
-        f"Gather | In:  {tensor.shape} -> {output_tensor.shape} Dim: {axis} "
-        f"Collecting: {len(gather_list)} chunks."
+        f"Allgather | In:  {tensor.shape} -> {output_tensor.shape} Dim: {axis} "
+        f"Collecting: {world_size} chunks."
     )
 
     return output_tensor
@@ -244,45 +239,17 @@ def _scatter_rank0_sync(
     axis: int = 0,
 ) -> Tensor:
     """Synchronous scatter from rank0 to all."""
-    # Rank0 has full-rank act tensor, need to shard output tensor
-    if dist.get_rank() == 0:
-        shape = list(tensor.shape)
-        world_size = _get_activation_parallel_world_size()
-        assert shape[axis] % world_size == 0
-        shape[axis] //= world_size
+    world_size = _get_activation_parallel_world_size()
+    if world_size == 1:
+        return tensor
+    input_list = torch.chunk(tensor, world_size, dim=axis)
 
-    # Non-rank0 workers already have stale sharded tensors
-    else:
-        shape = tensor.shape
+    rank = dist.get_rank()
+    output_tensor = input_list[rank].contiguous()
 
-    output_tensor = torch.empty(
-        shape,
-        dtype=tensor.dtype,
-        layout=tensor.layout,
-        device=tensor.device,
-    )
-
-    if dist.get_rank() == 0:
-        scatter_list = list(torch.chunk(
-            tensor,
-            chunks=world_size,
-            dim=axis,
-        ))
-
-        print_rank0(
-            f"Scatter | In:     {tensor.shape} -> {output_tensor.shape} Dim: {axis} "
-            f"Sending: {len(scatter_list)} chunks."
-        )
-
-    else:
-        scatter_list = None
-
-    dist.scatter(
-        tensor=output_tensor,
-        scatter_list=scatter_list,
-        src=0,
-        group=_get_activation_parallel_group(),
-        async_op=False,
+    print_rank0(
+        f"Scatter | In:     {tensor.shape} -> {output_tensor.shape} Dim: {axis} "
+        f"Sending: {world_size} chunks."
     )
 
     return output_tensor
