@@ -2,11 +2,10 @@ import logging
 from typing import Dict
 
 import torch
-import torch.distributed as dist
 from torch import Tensor
 
 from flex_model.model_wrappers import FlexModel
-from flex_model._distributed_utils import print_rank0
+import flex_model._distributed_utils as dist
 from flex_model.tests.testing_utils import (
     get_llama_13b_megatron,
     apply_flex_model_fwd_hooks,

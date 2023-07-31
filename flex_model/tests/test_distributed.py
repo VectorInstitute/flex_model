@@ -11,7 +11,6 @@ import torch.nn as nn
 from torch import Tensor
 
 from flex_model._traverse_utils import _recursively_find_first_tensor
-
 from flex_model.tests.testing_utils import (
     print_named_modules,
     print_return_dict,
@@ -95,13 +94,6 @@ def test_distributed_flex_model_fsdp():
         logger.info("Test complete!")
     else:
         return
-
-
-def test_weight_retrieval():
-    model, _ = get_llama_13b_hf()
-    _output_dict = {}
-    model = FlexModel(model, _output_dict)
-
 
 
 # TODO: Be more consistent with logging messages

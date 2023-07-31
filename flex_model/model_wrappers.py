@@ -19,12 +19,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from flex_model._distributed_utils import (
-    print_rank0,
-    _parse_collect_and_distribute_from_tensor,
-    _parse_edit_from_function,
-    _parse_dump_from_function,
-)
+import flex_model._distributed_utils as dist
 from flex_model._common_utils import (
     _FlexModelState,
     _HookFunctionState,
@@ -110,11 +105,11 @@ class HookFunction(_HookFunctionState):
         self._output_ptr[self.module_name] = dumped_tensor
 
     def _parse_tensor(self, tensor: Tensor) -> None:
-        self._collect, self._disperse = _parse_collect_and_distribute_from_tensor(
+        self._collect, self._disperse = dist._parse_collect_and_distribute_from_tensor(
             tensor, self.expected_shape,
         )
-        self._edit = _parse_edit_from_function(self.editing_function)
-        self._dump = _parse_dump_from_function(self._bind_tensor_to_cpu_output)
+        self._edit = dist._parse_edit_from_function(self.editing_function)
+        self._dump = dist._parse_dump_from_function(self._bind_tensor_to_cpu_output)
         
     def _hook_function_template(
         self,
@@ -124,7 +119,7 @@ class HookFunction(_HookFunctionState):
         _hook_trainable_modules: nn.ModuleDict,
     ) -> Optional[LayerOutputs]:
         """Internal template for hook function."""
-        print_rank0(f"*{self.module_name}: Hook function activated*")
+        dist.print_rank0(f"*{self.module_name}: Hook function activated*")
         tensor, _repack_layer_outputs, start_shape = self._unpack_layer_outputs(
             outputs,
         )
@@ -134,10 +129,7 @@ class HookFunction(_HookFunctionState):
 
         tensor = self._collect(tensor)
 
-        if not torch.distributed.is_initialized() or (
-            torch.distributed.is_initialized() and
-                torch.distributed.get_rank() == 0):
-
+        if not dist.is_initialized() or (dist.is_initialized() and dist.get_rank() == 0):
             # Dump then edit: See V-composition analysis algo
             self._dump(tensor)
 
@@ -234,7 +226,7 @@ class FlexModel(nn.Module, _FlexModelState):
                 )
                 self._hook_fn_handles[name] = _handle
 
-                print_rank0(f"Installing module: {name} forward hook")
+                dist.print_rank0(f"Installing module: {name} forward hook")
 
     def remove_hooks(self) -> None:
         for hook in self._hook_fn_handles.values():
@@ -275,7 +267,7 @@ class FlexModel(nn.Module, _FlexModelState):
         don't need to use the dispersion function.
         """
         local_param = self.module.get_parameter(parameter_name).detach()
-        collect_fn, _ = _parse_collect_and_distribute_from_tensor(
+        collect_fn, _ = dist._parse_collect_and_distribute_from_tensor(
             local_param,
             expected_shape,
         )

@@ -13,8 +13,7 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 
-
-from flex_model._distributed_utils import print_rank0
+import flex_model._distributed_utils as dist
 from flex_model.model_wrappers import FlexModel, HookFunction
 
 
@@ -28,9 +27,9 @@ def print_named_modules(model: nn.Module) -> None:
 
 
 def print_return_dict(d):
-    if (torch.distributed.is_initialized() and torch.distributed.get_rank() == 0) or torch.distributed.is_initialized():
+    if (dist.is_initialized() and dist.get_rank() == 0) or not dist.is_initialized():
         for n, m in d.items():
-            print_rank0(f"{n}: {m.shape}")
+            dist.print_rank0(f"{n}: {m.shape}")
 
 
 def parse_base_model_output_with_past(x):
@@ -67,6 +66,7 @@ def compare_tensor_dicts(
     mapping: Optional[Dict[str, str]] = None,
 ) -> bool:
     """Check equality between two dicts."""
+    # TODO: Fix impl
     if mapping is not None:
         for name1, name2 in mapping.items():
             assert name1 in dict1, f"Module {name1} not in dict"
@@ -84,8 +84,6 @@ def compare_tensor_dicts(
             ):
                 logger.info(f"Allclose FAILED for {name1} - {name2}"
                             f". Max diff: {torch.abs(act1 - act2).max()}")
-                #print_rank0(act1)
-                #print_rank0(act2)
 
             else:
                 logger.info(f"Allclose PASSED for {name1} - {name2}. "
@@ -191,7 +189,7 @@ def apply_torch_fwd_hooks(
         if shape is not None:
             res = res.reshape(*shape)
 
-        print_rank0(f"Dumping: {res.shape} to output dict")
+        dist.print_rank0(f"Dumping: {res.shape} to output dict")
         return_dict[registered_name] = res
 
     output_dict: Dict[str, Tensor] = {}

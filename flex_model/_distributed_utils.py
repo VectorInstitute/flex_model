@@ -3,23 +3,21 @@ import logging
 from typing import List, Tuple, Callable, Optional
 
 import torch
-import torch.distributed as dist
 from torch import Tensor
-
 
 _GLOBAL_ACTIVATION_GROUP = None
 
 logger = logging.getLogger(__name__)
 
 
-def _set_activation_group(ranks: List[int]) -> None:
+def init_activation_parallel_group(ranks: List[int]) -> None:
     """Given a list of ranks, initialize a new `ProcessGroup`"""
     global _GLOBAL_ACTIVATION_GROUP
 
     assert torch.distributed.get_world_size() >= len(ranks)
     assert _GLOBAL_ACTIVATION_GROUP is None
 
-    act_proc_group = dist.new_group(
+    act_proc_group = torch.distributed.new_group(
         ranks=ranks,
         backend="nccl",
     )
@@ -27,26 +25,39 @@ def _set_activation_group(ranks: List[int]) -> None:
     _GLOBAL_ACTIVATION_GROUP = act_proc_group
 
 
-def _get_activation_parallel_group() -> dist.ProcessGroup:
+def get_activation_parallel_group() -> torch.distributed.ProcessGroup:
     """Return global activation processes group handle."""
     global _GLOBAL_ACTIVATION_GROUP
     assert _GLOBAL_ACTIVATION_GROUP is not None
     return _GLOBAL_ACTIVATION_GROUP
 
 
-def _get_activation_parallel_world_size() -> int:
+def is_initialized() -> bool:
+    return torch.distributed.is_initialized()
+
+
+def get_world_size() -> int:
     """Return global activation processes world size."""
-    if not dist.is_initialized():
+    if not torch.distributed.is_initialized():
         return 1
 
-    return dist.get_world_size(
-        group=_get_activation_parallel_group(),
+    return torch.distributed.get_world_size(
+        group=get_activation_parallel_group(),
+    )
+
+
+def get_rank() -> int:
+    if not is_initialized():
+        return 0
+
+    return torch.distributed.get_rank(
+        group=get_activation_parallel_group(),
     )
 
 
 def print_rank0(msg: str) -> None:
     """Print to rank 0 worker."""
-    if dist.is_initialized() and dist.get_rank() == 0:
+    if is_initialized() and get_rank() == 0:
         print(msg, flush=True)
 
 
@@ -89,7 +100,7 @@ def _autofill_expected_shape(
 
 def _parse_collect_and_distribute_from_tensor(tensor: Tensor, expected_shape: Tuple[int, ...]) -> Tuple[Callable, Callable]:
     """Parse the activation tensor vs expected shape for distributed strategy."""
-    world_size = _get_activation_parallel_world_size()
+    world_size = get_world_size()
 
     # Handle unspecified dimensions
     expected_shape = _autofill_expected_shape(tensor, expected_shape)
@@ -157,10 +168,10 @@ def _broadcast_rank0_sync(
     tensor: Tensor,
 ) -> Tensor:
     """Synchronous broadcast from rank0."""
-    dist.broadcast(
+    torch.distributed.broadcast(
         tensor=tensor,
         src=0,
-        group=_get_activation_parallel_group(),
+        group=get_activation_parallel_group(),
         async_op=False,
     )
 
@@ -174,17 +185,17 @@ def _gather_rank0_sync(
     axis: int = 0,
 ) -> Tensor:
     """Syncronous gather onto rank0."""
-    world_size = _get_activation_parallel_world_size()
+    world_size = get_world_size()
     if world_size == 1:
         return tensor
 
     tensor_list = [torch.empty_like(tensor) for _ in range(world_size)]
-    tensor_list[dist.get_rank()] = tensor
+    tensor_list[get_rank()] = tensor
 
-    dist.all_gather(
+    torch.distributed.all_gather(
         tensor_list,
         tensor,
-        group=_get_activation_parallel_group(),
+        group=get_activation_parallel_group(),
         async_op=False,
     )
 
@@ -202,10 +213,10 @@ def _all_reduce_sync(
 ) -> Tensor:
     """Synchronous allreduce."""
     inplace_tensor = tensor.clone()
-    dist.all_reduce(
+    torch.distributed.all_reduce(
         tensor=inplace_tensor,
-        op=dist.ReduceOp.SUM,
-        group=_get_activation_parallel_group(),
+        op=torch.distributed.ReduceOp.SUM,
+        group=get_activation_parallel_group(),
         async_op=False,
     )
     return inplace_tensor
@@ -220,15 +231,15 @@ def _reduce_rank0_sync(
     activation tensor since the model may need it downstream.
     """
     inplace_tensor = tensor.clone()
-    dist.reduce(
+    torch.distributed.reduce(
         tensor=inplace_tensor,
         dst=0,
-        op=dist.ReduceOp.SUM,
-        group=_get_activation_parallel_group(),
+        op=torch.distributed.ReduceOp.SUM,
+        group=get_activation_parallel_group(),
         async_op=False,
     )
     # Shed non-rank0 workers
-    if torch.distributed.get_rank() != 0:
+    if get_rank() != 0:
         return tensor
 
     return inplace_tensor
@@ -239,12 +250,12 @@ def _scatter_rank0_sync(
     axis: int = 0,
 ) -> Tensor:
     """Synchronous scatter from rank0 to all."""
-    world_size = _get_activation_parallel_world_size()
+    world_size = get_world_size()
     if world_size == 1:
         return tensor
     input_list = torch.chunk(tensor, world_size, dim=axis)
 
-    rank = dist.get_rank()
+    rank = get_rank()
     output_tensor = input_list[rank].contiguous()
 
     print_rank0(

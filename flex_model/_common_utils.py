@@ -11,11 +11,7 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 
-from flex_model._distributed_utils import (
-    _set_activation_group,
-    _get_activation_parallel_group,
-    _get_activation_parallel_world_size,
-)
+import flex_model._distributed_utils as dist
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +100,7 @@ def _accelerate_distributed_is_initialized():
 def _init_distributed_function_state(
     state: _HookFunctionState,
 ) -> _HookFunctionState:
-    state._using_torch_distributed = True if torch.distributed.is_initialized() else False
+    state._using_torch_distributed = True if dist.is_initialized() else False
     state._using_accelerate_distributed = True if _accelerate_distributed_is_initialized() else False
     return state
 
@@ -152,14 +148,13 @@ def _init_distributed_model_state(
 
     logger.info(("*" * 10) + "DISTRIBUTED FEATURES ENABLED" + ("*" * 10))
 
-    state.rank = torch.distributed.get_rank()
-
     # Default to all workers for activation group
     # TODO: Make this configurable (prevent collision with other groups)
-    _set_activation_group(list(range(torch.distributed.get_world_size())))
+    dist.init_activation_parallel_group(list(range(torch.distributed.get_world_size())))
 
-    state.world_size = _get_activation_parallel_world_size()
-    state.process_group = _get_activation_parallel_group()
+    state.rank = dist.get_rank()
+    state.world_size = dist.get_world_size()
+    state.process_group = dist.get_activation_parallel_group()
 
     logger.info(
         f"Distributed activations initialized with params: "
