@@ -97,6 +97,13 @@ def test_distributed_flex_model_fsdp():
         return
 
 
+def test_weight_retrieval():
+    model, _ = get_llama_13b_hf()
+    _output_dict = {}
+    model = FlexModel(model, _output_dict)
+
+
+
 # TODO: Be more consistent with logging messages
 def main():
     # Distributed config

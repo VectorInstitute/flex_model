@@ -254,14 +254,33 @@ class FlexModel(nn.Module, _FlexModelState):
         finally:
             self.remove_hooks()
 
+    def freeze_wrapped_model(self) -> None:
+        self.module.requires_grad_(False)
+
+    def unfreeze_wrapped_model(self) -> None:
+        self.module.requires_grad_(True)
+
     def module_names(self) -> List[str]:
         return [n for n, _ in self.module.named_modules()]
 
     def parameter_names(self) -> List[str]:
         return [n for n, _ in self.module.named_parameters()]
 
-    def get_parameter(self, module_name):
-        NotImplementedError
+    def get_module_parameter(self, parameter_name: str, expected_shape: Tuple[int, ...]):
+        """Convenience function to retrieve a full weight.
+
+        Similar workflow to activation retrieval/editing in the hook functions
+        in that we must potentially gather the weight across ranks beforehand.
+        Hence we will use the same utility to decide on the collective, but we
+        don't need to use the dispersion function.
+        """
+        local_param = self.module.get_parameter(parameter_name).detach()
+        collect_fn, _ = _parse_collect_and_distribute_from_tensor(
+            local_param,
+            expected_shape,
+        )
+        full_param = collect_fn(local_param).cpu()
+        return full_param
 
     def forward(self, *args, **kwargs) -> Any:
         """Run forward of wrapped model."""
@@ -269,3 +288,19 @@ class FlexModel(nn.Module, _FlexModelState):
             logger.info("Running forward")
             outputs = self.module(*args, **kwargs)
         return outputs
+
+
+class DummyModule(nn.Module):
+    """Identity module used to expose activations.
+
+    Can be placed in any `nn.Module` to artificially create an activation to
+    be hooked onto. For instance, explicitly calling a module's `.forward()`
+    method will not run forward hooks and therefore will not generate an
+    activation. However, applying this module to the output of that will
+    generate an activation which can be hooked onto.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, inputs):
+        return inputs
