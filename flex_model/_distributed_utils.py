@@ -93,7 +93,7 @@ def _autofill_expected_shape(
         else d2
         for d1, d2 in zip(tensor_shape, expected_shape)
     )
-    print_rank0(f"Inferring shape: User-{expected_shape}, Inferred-"
+    logger.info(f"Inferring shape: User-{expected_shape}, Inferred-"
                 f"{filled_shape}")
     return filled_shape
 
@@ -160,7 +160,7 @@ def _parse_dump_from_function(dump_function):
 
 
 def _unity(tensor: Tensor):
-    print_rank0(f"Unity | In:   {tensor.shape}")
+    logger.info(f"Unity | In:   {tensor.shape}")
     return tensor
 
 
@@ -175,7 +175,7 @@ def _broadcast_rank0_sync(
         async_op=False,
     )
 
-    print_rank0(f"Broadcast | In:   {tensor.shape}")
+    logger.info(f"Broadcast | In:   {tensor.shape}")
 
     return tensor
 
@@ -200,7 +200,7 @@ def _gather_rank0_sync(
     )
 
     output_tensor = torch.cat(tensor_list, dim=axis)
-    print_rank0(
+    logger.info(
         f"Allgather | In:  {tensor.shape} -> {output_tensor.shape} Dim: {axis} "
         f"Collecting: {world_size} chunks."
     )
@@ -258,7 +258,7 @@ def _scatter_rank0_sync(
     rank = get_rank()
     output_tensor = input_list[rank].contiguous()
 
-    print_rank0(
+    logger.info(
         f"Scatter | In:     {tensor.shape} -> {output_tensor.shape} Dim: {axis} "
         f"Sending: {world_size} chunks."
     )

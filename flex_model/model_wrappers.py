@@ -38,12 +38,17 @@ from flex_model._traverse_utils import (
     _unflatten,
 )
 
+
 LayerOutputs = Union[InternalObject, LeafObject, ScalarObject]
-logging.basicConfig(
-    format="%(asctime)s | %(name)s | %(funcName)s | %(message)s",
-    level=logging.INFO,
-)
+
 logger = logging.getLogger(__name__)
+
+
+def setup_logger(level):
+    logging.basicConfig(
+        format="%(asctime)s | %(name)s | %(funcName)s | %(message)s",
+        level=level.upper(),
+    )
 
 
 # TODO: Implement hook functions which can add grad-requiring layers
@@ -119,7 +124,7 @@ class HookFunction(_HookFunctionState):
         _hook_trainable_modules: nn.ModuleDict,
     ) -> Optional[LayerOutputs]:
         """Internal template for hook function."""
-        dist.print_rank0(f"*{self.module_name}: Hook function activated*")
+        logger.info(f"*{self.module_name}: Hook function activated*")
         tensor, _repack_layer_outputs, start_shape = self._unpack_layer_outputs(
             outputs,
         )
@@ -226,7 +231,7 @@ class FlexModel(nn.Module, _FlexModelState):
                 )
                 self._hook_fn_handles[name] = _handle
 
-                dist.print_rank0(f"Installing module: {name} forward hook")
+                logger.info(f"Installing module: {name} forward hook")
 
     def remove_hooks(self) -> None:
         for hook in self._hook_fn_handles.values():
