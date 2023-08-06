@@ -2,6 +2,7 @@ import argparse
 import logging
 import math
 
+from tqdm import tqdm
 from datasets import load_dataset
 from llama import Llama
 import torch
@@ -27,9 +28,11 @@ class LensTrainer:
         model,
         tokenize_fn,
         activation_dict,
+        batch_size,
         warmup_steps,
         num_steps,
-        train_steps_per_eval,
+        train_steps,
+        eval_steps,
         lr_scale,
         momentum,
         wd,
@@ -42,17 +45,44 @@ class LensTrainer:
         self.model = model
         self.tokenize_fn = tokenize_fn
         self.activation_dict = activation_dict
+        self.batch_size = batch_size
         self.warmup_steps = warmup_steps
         self.num_steps = num_steps
-        self.train_steps_per_eval = train_steps_per_eval
+        self.train_steps = train_steps
+        self.eval_steps = eval_steps
         self.lr_scale = lr_scale
         self.momentum = momentum
         self.wd = wd
         self.clip = clip
 
-    def make_loss_mask(self, inputs):
+        unembed = self.make_unembed()
+        rms_norm = self.make_rms_norm()
+        if dist.get_rank() == 0:
+            self.unembed = unembed.to(torch.bfloat16).cuda()
+            self.rms_norm = rms_norm.to(torch.bfloat16).cuda()
+            self.lens = self.make_lens()
+            self.optim = self.make_optimizer()
+            self.scheduler = self.make_scheduler()
+
+        self.train_dataloader, self.eval_dataloader = self.make_dataloaders()
+
+    def make_loss_mask(self, batch):
         # 0 is the pad id for llama
-        return (inputs != 0)
+        return (batch != 0)
+
+    def make_unembed(self):
+        unembed = self.model.get_module_parameter(
+            "output.weight",
+            (self.vocab_size, self.hidden_dim),
+        )
+        return unembed
+
+    def make_rms_norm(self):
+        rms_norm = self.model.get_module_parameter(
+            "norm.weight",
+            (self.hidden_dim,),
+        )
+        return rms_norm
 
     def make_dataloaders(self):
         def collate_fn(examples):
@@ -62,22 +92,32 @@ class LensTrainer:
             return self.tokenize_fn(examples)
 
         dataset = load_dataset("wikitext", "wikitext-103-v1")
-        train_dataloader = DataLoader(dataset["train"], batch_size=8, num_workers=0, collate_fn=collate_fn)
-        eval_dataloader = DataLoader(dataset["validation"], batch_size=8, num_workers=0, collate_fn=collate_fn)
+        train_dataloader = DataLoader(
+            dataset["train"],
+            batch_size=self.batch_size,
+            num_workers=0,
+            collate_fn=collate_fn,
+        )
+        eval_dataloader = DataLoader(
+            dataset["validation"],
+            batch_size=self.batch_size,
+            num_workers=0,
+            collate_fn=collate_fn,
+        )
         return train_dataloader, eval_dataloader
 
-    def make_optimizer(self, lens):
+    def make_optimizer(self):
         return torch.optim.SGD(
-            lens.parameters(),
+            self.lens.parameters(),
             lr=self.lr_scale * (1 - self.momentum),
             momentum=self.momentum,
             weight_decay=self.wd,
             nesterov=True,
         )
 
-    def make_scheduler(self, optim):
+    def make_scheduler(self):
         return get_linear_schedule_with_warmup(
-            optim,
+            self.optim,
             num_warmup_steps=self.warmup_steps,
             num_training_steps=self.num_steps,
         )
@@ -86,14 +126,16 @@ class LensTrainer:
         return LlamaLens(
             hidden_dim=self.hidden_dim,
             num_layers=self.num_layers,
+            unembed=self.unembed,
+            rms_norm=self.rms_norm,
         ).cuda()
 
-    def train_step(self, step, lens, batch, optim, scheduler, unembed, rms_norm):
+    def train_step(self, batch, step):
         with torch.no_grad():
             logits = self.model.forward(batch.cuda(), start_pos=0)
 
         if dist.get_rank() == 0:
-            optim.zero_grad()
+            self.optim.zero_grad()
 
             activations = torch.stack([
                 self.activation_dict.pop(layer)
@@ -102,59 +144,74 @@ class LensTrainer:
 
             mask = self.make_loss_mask(batch).cuda()
 
-            loss, layer_pp = lens.get_loss(activations, unembed, rms_norm, logits, mask)
+            loss, layer_pp = self.lens.get_loss(activations, logits, mask)
             assert loss.isfinite()
 
             loss.backward()
 
-            nn.utils.clip_grad_norm_(lens.parameters(), self.clip)
+            nn.utils.clip_grad_norm_(self.lens.parameters(), self.clip)
 
-            optim.step()
+            self.optim.step()
+            self.scheduler.step()
 
             print(">" * 4 + f"Loss at iteration {step}: {loss.item()}")
             print(f"Layer perplexity at iteration {step}: {layer_pp}")
 
         dist.barrier()
 
-
-    def eval_step(self):
-        pass
-
     def train(self):
-        train_dataloader, eval_dataloader = self.make_dataloaders()
-        train_dataloader = iter(train_dataloader)
-        eval_dataloader = iter(eval_dataloader)
-
         if dist.get_rank() == 0:
-            lens = self.make_lens()
-            optim = self.make_optimizer(lens)
-            scheduler = self.make_scheduler(optim)
-        else:
-            optim = None
-            scheduler = None
-            lens = None
+            self.lens.train()
 
-        unembed = self.model.get_module_parameter("output.weight", (self.vocab_size, self.hidden_dim))
-        rms_norm = self.model.get_module_parameter("norm.weight", (self.hidden_dim,))
+        train_dataloader = iter(self.train_dataloader)
 
-        if dist.get_rank() == 0:
-            unembed = unembed.to(torch.bfloat16).cuda()
-            rms_norm = rms_norm.to(torch.bfloat16).cuda()
-        else:
-            unembed = None
-            rms_norm = None
+        for step in range(self.num_steps):
+            print(f"GPU usage: {torch.cuda.memory_allocated(0) / 1_000_000_000}G")
+            if step % self.train_steps == 0:
+                self.eval()
+                if dist.get_rank() == 0:
+                    self.lens.train()
 
-        for i in range(self.num_steps):
             batch = next(train_dataloader)
-            self.train_step(
-                i,
-                lens,
-                batch,
-                optim,
-                scheduler,
-                unembed,
-                rms_norm,
-            )
+            self.train_step(batch, step)
+
+    def eval_step(self, batch):
+        with torch.no_grad():
+            logits = self.model.forward(batch.cuda(), start_pos=0)
+
+        if dist.get_rank() == 0:
+            activations = torch.stack([
+                self.activation_dict.pop(layer)
+                for layer in self.layers
+            ], dim=0).cuda()
+
+            mask = self.make_loss_mask(batch).cuda()
+
+            with torch.no_grad():
+                loss, _ = self.lens.get_loss(activations, logits, mask)
+
+        else:
+            loss = 0
+
+        dist.barrier()
+
+        return loss
+
+    def eval(self):
+        if dist.get_rank() == 0:
+            self.lens.eval()
+
+        eval_loss = 0
+        eval_dataloader = iter(self.eval_dataloader)
+
+        for step in tqdm(range(self.eval_steps)):
+            batch = next(eval_dataloader)
+            loss = self.eval_step(batch)
+            eval_loss += loss
+
+        if dist.get_rank() == 0:
+            eval_loss /= self.eval_steps
+            print(f"Eval loss: {eval_loss}")
 
 
 def kl_divergence(p, q, mask=None):
@@ -177,43 +234,73 @@ def kl_divergence(p, q, mask=None):
     return kl_div, layer_perplexity
 
 
-class LlamaLens(nn.Module):
+class Translators(nn.Module):
     def __init__(self, hidden_dim, num_layers):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
 
-        self.lenses_A = nn.parameter.Parameter(torch.eye(hidden_dim, dtype=torch.bfloat16)[None, :].tile((num_layers, 1, 1)), requires_grad=True)
+        # Translators init to identity
+        linear = torch.eye(hidden_dim, dtype=torch.bfloat16)[None, :]
+        linear = linear.tile((num_layers, 1, 1))
+        self.translators = nn.parameter.Parameter(linear, requires_grad=True)
 
-        stdv = 1. / math.sqrt(self.lenses_A.size(-1))
-        self.lenses_b = nn.parameter.Parameter(torch.zeros((num_layers, 1, 1, hidden_dim), dtype=torch.bfloat16), requires_grad=True)
-        self.lenses_b.data.uniform_(-stdv, stdv)
+        # Bias init like regular affine layer bias
+        stdv = 1. / math.sqrt(self.translators.size(-1))
+        bias = torch.zeros((num_layers, 1, 1, hidden_dim), dtype=torch.bfloat16)
+        self.bias = nn.parameter.Parameter(bias, requires_grad=True)
+        self.bias.data.uniform_(-stdv, stdv)
 
-    def forward(self, activations):
-        activations = activations.to(torch.bfloat16)
-        return torch.einsum("lbsh,lhH->lbsH", activations, self.lenses_A) + self.lenses_b
+    def forward(self, layer_activations):
+        layer_activations.to(torch.bfloat16)
+        out = torch.einsum(
+            "lbsh,lhH->lbsH",
+            layer_activations,
+            self.translators,
+        )
+        out += self.bias
+        return out
 
-    def get_loss(self, activations, unembed, rms_norm, true_logits, mask):
-        def norm(x):
-            _norm = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + 1e-6)
-            return _norm.type_as(x) * rms_norm
 
-        # Apply translators
-        activations = activations.to(torch.bfloat16)
-        pseudo_logits = self.forward(activations)
+class LlamaLens(nn.Module):
+    def __init__(
+        self,
+        hidden_dim,
+        num_layers,
+        unembed,
+        rms_norm,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.translators = Translators(
+            self.hidden_dim,
+            self.num_layers,
+        )
+        self.unembed = unembed
+        self.rms_norm = rms_norm
 
-        # Apply llama final layer norm
-        pseudo_logits = norm(pseudo_logits)
+    def norm(self, x):
+        out = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + 1e-6)
+        return out.type_as(x) * self.rms_norm
 
-        # Produce estimated logits
-        pseudo_logits = torch.einsum("lbsh,vh->lbsv", pseudo_logits, unembed)
+    def forward(self, layer_activations):
+        layer_activations = layer_activations.to(torch.bfloat16)
+        pred_logits = self.translators(layer_activations)
+        pred_logits = self.norm(pred_logits)
+        pred_logits = torch.einsum(
+            "lbsh,vh->lbsv",
+            pred_logits,
+            self.unembed,
+        )
+        return pred_logits
+       
+    def get_loss(self, activations, true_logits, mask):
+        pred_logits = self.forward(activations)
 
-        if pseudo_logits.isnan().sum() != 0:
-            breakpoint()
-
-        # Calculate loss
         mask = mask[None, :, :, None]
-        kl_div, layer_perplexity = kl_divergence(true_logits, pseudo_logits)
+
+        kl_div, layer_perplexity = kl_divergence(true_logits, pred_logits)
 
         return kl_div, layer_perplexity
 
@@ -233,10 +320,17 @@ def make_llama2_model(checkpoint_dir, tokenizer_path, max_seq_len, max_batch_siz
         bsz = len(input_tokens)
         total_len = min(max(len(t) for t in input_tokens), max_seq_len)
         pad_id = 0
-        tokens = torch.full((bsz, total_len), pad_id, dtype=torch.long, device="cuda")
+        tokens = torch.full(
+            (bsz, total_len),
+            pad_id,
+            dtype=torch.long,
+            device="cuda",
+        )
         for k, t in enumerate(input_tokens):
             seq_len = min(len(t), max_seq_len)
-            tokens[k, : seq_len] = torch.tensor(t[:seq_len], dtype=torch.long, device="cuda")
+            tokens[k, : seq_len] = torch.tensor(
+                t[:seq_len], dtype=torch.long, device="cuda"
+            )
         return tokens
 
     return model, tokenize
