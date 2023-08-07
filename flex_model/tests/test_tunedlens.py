@@ -6,9 +6,9 @@ import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.utils.data import DataLoader
+from llama import Llama
 
-from flex_model.tests.tunedlens_utils import LensTrainer, make_llama2_model, setup_logger
-from flex_model.model_wrappers import FlexModel, HookFunction
+from flex_model.model_wrappers import FlexModel, HookFunction, setup_logger
 
 from flex_model.tests.distributed_tunedlens import (
     DistributedTunedLens,
@@ -25,6 +25,8 @@ def parse_args():
     parser.add_argument("--log_level", type=str, default="warning")
     parser.add_argument("--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b")
     parser.add_argument("--tokenizer_path", type=str, default="/ssd005/projects/llm/llama-2-13b/tokenizer.model")
+    parser.add_argument("--hidden_dim", type=int, default=5120)
+    parser.add_argument("--vocab_size", type=int, default=32000)
     parser.add_argument("--max_seq_len", type=int, default=512)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--clip", type=float, default=1.0)
@@ -38,6 +40,37 @@ def parse_args():
     parser.add_argument("--log_interval", type=int, default=5)
     args = parser.parse_args()
     return args
+
+
+def make_llama2_model(checkpoint_dir, tokenizer_path, max_seq_len, max_batch_size):
+    generator = Llama.build(
+        ckpt_dir=checkpoint_dir,
+        tokenizer_path=tokenizer_path,
+        max_seq_len=max_seq_len,
+        max_batch_size=max_batch_size,
+    )
+    model = generator.model
+    tokenizer = generator.tokenizer
+
+    def tokenize(prompts):
+        input_tokens = [tokenizer.encode(x, bos=True, eos=False) for x in prompts]
+        bsz = len(input_tokens)
+        total_len = min(max(len(t) for t in input_tokens), max_seq_len)
+        pad_id = 0
+        tokens = torch.full(
+            (bsz, total_len),
+            pad_id,
+            dtype=torch.long,
+            device="cuda",
+        )
+        for k, t in enumerate(input_tokens):
+            seq_len = min(len(t), max_seq_len)
+            tokens[k, : seq_len] = torch.tensor(
+                t[:seq_len], dtype=torch.long, device="cuda"
+            )
+        return tokens
+
+    return model, tokenize
 
 
 def get_wikitext103_dataloaders(batch_size, tokenize_fn):
@@ -91,8 +124,8 @@ def distributed_main(args):
 
     dtl = DistributedTunedLens(
         frozen_model=model,
-        vocab_size=32000,
-        hidden_dim=5120,
+        vocab_size=args.vocab_size,
+        hidden_dim=args.hidden_dim,
         lens_model_parallel_size=torch.distributed.get_world_size(),
     )
     dtl_config = DistributedTunedLensTrainerConfig(
