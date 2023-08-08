@@ -36,12 +36,15 @@ inputs = tokenizer(...)
 # across gpus.
 expected_shape = (None, None, 13824)
 
-# Hook function requires a module to retrieve outputs from, the expected shape
-# of the activation, and optionally an editing function.
+# Hook function requires:
+#	- A module to retrieve outputs from
+#	- The expected shape of the activation
+#	- Optionally an editing function (2nd input arg is for having trainable
+#	  modules in the hook function)
 hook_function = HookFunction(
 	module_name="layers.7.feed_forward.w1",
 	expected_shape=expected_shape,
-	editing_function=lambda x: x * 2,
+	editing_function=lambda x, _: x * 2,
 )
 
 flex_model.register_hook_function(hook_function)
@@ -58,4 +61,28 @@ model.forward(inputs)
 
 `accelerate launch test_distributed.py` <- Make sure this is run on 2 GPUs
 
+```
+torchrun --nnodes 1 \
+	--nproc_per_node 2 \
+	--rdzv_id 6969 \
+	--rdzv_backend c10d \
+	--rdzv_endpoint <gpuXXX> \
+	--test_megatron.py
+```
 
+# Running TunedLens
+Here's an example command to do a training run of TunedLens using the
+FlexModel backend to retrieve weights and activations. The implementation is
+basic and does not do any checkpointing. For full launch options, check out
+the `test_tunedlens.py` script.
+```
+torchrun --nnodes 1 \
+	--nproc_per_node 2 \
+	--rdzv_id 6969 \
+	--rdzv_backend c10d \
+	--rdzv_endpoint <gpuXXX> \
+	--test_tunedlens.py \
+	--log_level warning \
+	--batch_size 16 \
+	--num_steps 250
+```

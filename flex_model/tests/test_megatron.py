@@ -4,7 +4,7 @@ from typing import Dict
 import torch
 from torch import Tensor
 
-from flex_model.model_wrappers import FlexModel
+from flex_model.model_wrappers import FlexModel, setup_logger
 import flex_model._distributed_utils as dist
 from flex_model.tests.testing_utils import (
     get_llama_13b_megatron,
@@ -78,6 +78,7 @@ def test_weight_retrieval():
 
 
 def main():
+    setup_logger("info")
     # TODO: Can't run both at once with *different* models
     test_distributed_flex_model_megatron()
     #test_weight_retrieval()
