@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from flex_model.model_wrappers import FlexModel
+from flex_model.model_wrappers import FlexModel, setup_logger
 from flex_model._traverse_utils import (
     _recursively_find_first_tensor,
     _flatten,
@@ -97,6 +97,7 @@ def test_traversal_utils():
 
 # TODO: Be more consistent with logging messages
 def main():
+    setup_logger("info")
     logger.info("Testing simple PyTorch model...")
     test_simple_model()
     logger.info("Test successful!")

@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from flex_model.model_wrappers import setup_logger
 from flex_model._traverse_utils import _recursively_find_first_tensor
 from flex_model.tests.testing_utils import (
     print_named_modules,
@@ -98,6 +99,7 @@ def test_distributed_flex_model_fsdp():
 
 # TODO: Be more consistent with logging messages
 def main():
+    setup_logger("info")
     # Distributed config
     #os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["NCCL_IB_DISABLE"] = "1"

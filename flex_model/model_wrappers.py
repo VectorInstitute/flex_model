@@ -67,7 +67,7 @@ class HookFunction(_HookFunctionState):
     def __init__(
         self,
         module_name: str,
-        expected_shape: Tuple[int, ...],
+        expected_shape: Tuple[Optional[int], ...],
         editing_function: Optional[Callable] = lambda x: x,
     ) -> None:
         _init_distributed_function_state(self)
