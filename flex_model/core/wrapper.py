@@ -87,6 +87,7 @@ class FlexModel(nn.Module):
             for hook in self._hook_function_handles.values():
                 hook.remove()
             self._hook_function_handles.clear()
+            self._hooks_active = False
 
     @contextmanager
     def _hook(self) -> Generator:
@@ -139,7 +140,7 @@ class FlexModel(nn.Module):
             outputs = self.module(*args, **kwargs)
         else:
             with self._hook():
-                logger.debug("Rank{dist.get_rank()}: Running forward")
+                logger.debug(f"Rank{dist.get_rank()}: Running forward")
                 outputs = self.module(*args, **kwargs)
 
         return outputs

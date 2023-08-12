@@ -8,10 +8,11 @@ import torch.distributed as dist
 from torch.utils.data import DataLoader
 from llama import Llama
 
-from flex_model.model_wrappers import FlexModel, HookFunction, setup_logger
-
-from flex_model.tests.distributed_tunedlens import (
+from flex_model.utils import setup_logger
+from flex_model.tunedlens.distributed_tunedlens import (
     DistributedTunedLens,
+)
+from flex_model.tunedlens.trainer import (
     DistributedTunedLensTrainer,
     DistributedTunedLensTrainerConfig,
 )
@@ -38,6 +39,8 @@ def parse_args():
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--weight_decay", type=float, default=1e-3)
     parser.add_argument("--log_interval", type=int, default=5)
+    parser.add_argument("--tl_checkpoint_interval", type=int, default=1000)
+    parser.add_argument("--tl_checkpoint_dir", type=str, default="/ssd003/home/mchoi/projects/flex_model/flex_model/tunedlens/checkpoints")
     args = parser.parse_args()
     return args
 
@@ -141,8 +144,10 @@ def distributed_main(args):
         momentum=args.momentum,
         weight_decay=args.weight_decay,
         clip=args.clip,
+        checkpoint_dir=args.tl_checkpoint_dir,
+        checkpoint_interval=args.tl_checkpoint_interval,
     )
-    dtl_trainer = DistributedTunedLensTrainer(
+    dtl_trainer = DistributedTunedLensTrainer.init(
         dtl,
         dtl_config,
         train_dataloader,

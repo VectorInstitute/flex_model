@@ -12,44 +12,11 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from transformers import get_linear_schedule_with_warmup
 
-from flex_model.model_wrappers import FlexModel, HookFunction
+from flex_model.core import FlexModel, HookFunction
+import flex_model.tunedlens.distributed as tl_dist
 
 
-LENS_MODEL_PARALLEL_GROUP = None
 logger = logging.getLogger(__name__)
-
-
-def init_lens_model_parallel(
-    lens_model_parallel_size: int = 1
-) -> None:
-    """Initialize lens model parallel group."""
-    global LENS_MODEL_PARALLEL_GROUP
-    assert LENS_MODEL_PARALLEL_GROUP is None
-
-    ranks = list(range(lens_model_parallel_size))
-    assert dist.get_world_size() >= len(ranks)
-
-    LENS_MODEL_PARALLEL_GROUP = dist.new_group(
-        ranks=ranks,
-        backend="nccl",
-    )
-
-
-def get_lens_model_parallel_group() -> dist.ProcessGroup:
-    """Return the lens model parallel group."""
-    global LENS_MODEL_PARALLEL_GROUP
-    assert LENS_MODEL_PARALLEL_GROUP is not None
-    return LENS_MODEL_PARALLEL_GROUP
-
-
-def get_lens_model_parallel_world_size() -> int:
-    """Return the lens model parallel group (world) size."""
-    return dist.get_world_size(group=get_lens_model_parallel_group())
-
-
-def get_lens_model_parallel_rank() -> int:
-    """Return the lens model parallel rank."""
-    return dist.get_rank(group=get_lens_model_parallel_group())
 
 
 def print_gpu_dram() -> None:
@@ -58,7 +25,7 @@ def print_gpu_dram() -> None:
     reserved = torch.cuda.memory_reserved()
     percent_used = int(allocated / reserved * 100)
     allocated_rounded = round(allocated / 1_000_000_000, 2)
-    rank = get_lens_model_parallel_rank()
+    rank = tl_dist.get_lens_model_parallel_rank()
     logger.warning(f"Rank{rank}: GPU mem used: {allocated_rounded}G - {percent_used}%")
 
 
@@ -198,15 +165,15 @@ class DistributedTunedLens(nn.Module):
                     f"all_layers={self.all_layers}, ")
 
         # Init model parallel group
-        init_lens_model_parallel(lens_model_parallel_size)
+        tl_dist.initialize_lens_model_parallel(lens_model_parallel_size)
 
         # Init subset of layers for lens model parallel group
         stride = self.total_layers // lens_model_parallel_size
-        bottom = get_lens_model_parallel_rank() * stride 
+        bottom = tl_dist.get_lens_model_parallel_rank() * stride 
         top = bottom + stride
         self.layers = [f"{layers_prefix}.{i}" for i in range(bottom, top)]
         self.num_layers = len(self.layers)
-        logger.info(f"Rank{get_lens_model_parallel_rank()}: {self.num_layers} "
+        logger.info(f"Rank{tl_dist.get_lens_model_parallel_rank()}: {self.num_layers} "
                     f"layers - {self.layers}")
 
         # Canonicalize dtypes
@@ -228,7 +195,6 @@ class DistributedTunedLens(nn.Module):
                 HookFunction(
                     layer_name,
                     expected_shape=(None, None, self.hidden_dim),
-                    editing_function=lambda x, _: x,
                 ),
             )
 
@@ -292,14 +258,14 @@ class DistributedTunedLens(nn.Module):
                 On rank0: output_list = [[tensor1]]
                 On rank1: output_list = [[tensor2]]
         """
-        world_size = get_lens_model_parallel_world_size()
+        world_size = tl_dist.get_lens_model_parallel_world_size()
 
         # Non-distributed fallback
         if world_size == 1:
             return self._convert_layer_dict_to_list(self.activation_dict)
 
         # Worker 0
-        if get_lens_model_parallel_rank() == 0:
+        if tl_dist.get_lens_model_parallel_rank() == 0:
             # Activation dict to list
             act_list = self._convert_layer_dict_to_list(self.activation_dict)
 
@@ -325,11 +291,9 @@ class DistributedTunedLens(nn.Module):
         output_list = output_list[0]
 
         # Log scatter logic
-        if get_lens_model_parallel_rank() == 0:
-            logger.info(f"Rank{get_lens_model_parallel_rank()} Scatter: "
+        if tl_dist.get_lens_model_parallel_rank() == 0:
+            logger.info(f"Rank{tl_dist.get_lens_model_parallel_rank()} Scatter: "
                         f"[{len(objects) * len(objects[0])}] -> [{len(output_list)}]")
-
-
         return output_list
 
     def streamed_loss(self, batch, loss_fn, chunks=4):
@@ -343,7 +307,7 @@ class DistributedTunedLens(nn.Module):
 
         # Forward pass to generate activations and target logits
         with torch.no_grad():
-            logits = self.frozen_model.forward(batch.cuda(), start_pos=0)
+            logits = self.frozen_model(batch.cuda(), start_pos=0)
 
         # Distribute activations from rank0 to all others and consolidate
         activations = self.scatter_activations()
@@ -382,7 +346,7 @@ class DistributedTunedLens(nn.Module):
     def forward(self, batch):
         """Standard forward pass to unembed activations."""
         with torch.no_grad():
-            logits = self.frozen_model.forward(batch.cuda(), start_pos=0)
+            logits = self.frozen_model(batch.cuda(), start_pos=0)
 
         activations = self.scatter_activations()
         activations = torch.stack([act for act in activations], dim=0)
@@ -400,135 +364,3 @@ class DistributedTunedLens(nn.Module):
         pred_logits = self.unembed(pred_logits)
 
         return logits, pred_logits
-
-
-@dataclass
-class DistributedTunedLensTrainerConfig:
-    """Metadata object for distributed lens training."""
-    optimizer_type: torch.optim.Optimizer = torch.optim.SGD
-    use_scheduler: bool = True
-    batch_size: int = 8
-    lr_warmup_steps: int = 0
-    total_num_steps: int = 250
-    train_steps_per_val: int = 20
-    val_steps: int = 50
-    log_interval: int = 5
-    lr_scale: float = 1.0
-    momentum: float = 0.9
-    weight_decay: float = 1e-3
-    clip: float = 1.0
-    loss_fn: Callable = kl_divergence
-
-
-class DistributedTunedLensTrainer:
-    """Distributed TunedLens trainer."""
-    def __init__(
-        self,
-        distributed_tuned_lens: DistributedTunedLens,
-        config: DistributedTunedLensTrainerConfig,
-        train_dataloader: DataLoader,
-        val_dataloader: DataLoader,
-        test_dataloader: DataLoader,
-    ) -> None:
-        self.distributed_tuned_lens = distributed_tuned_lens
-        self.config = config
-        self.train_dataloader = train_dataloader
-        self.val_dataloader = val_dataloader
-        self.test_datalaoder = test_dataloader
-
-        self.parse_config()
-
-    def parse_config(self) -> None:
-        """Parse out config for optimizers, schedulers, etc."""
-        # TODO: Only works for SGD right now
-        self.optimizer = self.config.optimizer_type(
-            self.distributed_tuned_lens.parameters(),
-            lr=self.config.lr_scale * (1 - self.config.momentum),
-            momentum=self.config.momentum,
-            weight_decay=self.config.weight_decay,
-            nesterov=True,
-        )
-        # TODO: Parameterize the type of scheduler
-        #       Ie. scheduler_type in ["linear", "cosine", ...] and select
-        #       constructor function with args based on that.
-        if self.config.use_scheduler:
-            self.scheduler = get_linear_schedule_with_warmup(
-                self.optimizer,
-                num_warmup_steps=self.config.lr_warmup_steps,
-                num_training_steps=self.config.total_num_steps,
-            )
-        else:
-            self.scheduler = None
-
-    def train(self):
-        """Train loop."""
-        self.distributed_tuned_lens.train()
-
-        train_dataloader = iter(self.train_dataloader)
-
-        interval_loss = 0
-        for step in tqdm(range(self.config.total_num_steps)):
-            if step != 0 and step % self.config.train_steps_per_val == 0:
-                self.validate()
-
-            batch = next(train_dataloader)
-            loss = self.train_step(batch)
-
-            interval_loss += loss
-
-            if step != 0 and step % self.config.log_interval == 0:
-                print(f"Rank{get_lens_model_parallel_rank()} loss at {step}: {interval_loss / self.config.log_interval}")
-                interval_loss = 0
-            
-    def train_step(self, batch):
-        self.optimizer.zero_grad()
-
-        """
-        logits, pred_logits = self.distributed_tuned_lens(batch)
-
-        # Mask is bs -> lbsv
-        mask = (batch != 0).cuda()
-        mask = mask[None, :, :, None]
-
-        loss = self.config.loss_fn(logits, pred_logits, mask=mask)
-        """
-        loss = self.distributed_tuned_lens.streamed_loss(
-            batch,
-            loss_fn=self.config.loss_fn,
-            chunks=4,
-        )
-        assert loss.isfinite()
-
-        loss.backward()
-
-        nn.utils.clip_grad_norm_(self.distributed_tuned_lens.parameters(), self.config.clip)
-
-        self.optimizer.step()
-
-        if self.scheduler is not None:
-            self.scheduler.step()
-
-        return loss.item()
-
-    def validate(self):
-        self.distributed_tuned_lens.eval()
-
-        val_dataloader = iter(self.val_dataloader)
-
-        val_loss = 0
-        for step in tqdm(range(self.config.val_steps)):
-            batch = next(val_dataloader)
-            loss = self.validate_step(batch)
-            val_loss += loss.item()
-
-        val_loss = val_loss / self.config.val_steps
-        print(f"Rank{get_lens_model_parallel_rank()} val loss at {step}: {val_loss}")
-
-    def validate_step(self, batch):
-        with torch.no_grad():
-            loss = self.distributed_tuned_lens.streamed_loss(
-                batch,
-                loss_fn=self.config.loss_fn,
-                chunks=4,
-            )
-        return loss
