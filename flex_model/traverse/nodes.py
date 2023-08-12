@@ -21,6 +21,7 @@ _LEAF_NODE_TYPE_REGISTRY: Dict[type, LeafNode] = {}
 def register_internal_node_type(internal_node_type: type) -> Callable:
     def _inner(_internal_node_cls: InternalNode) -> None:
         _INTERNAL_NODE_TYPE_REGISTRY[internal_node_type] = _internal_node_cls
+        return _internal_node_cls
 
     return _inner
 
@@ -28,6 +29,7 @@ def register_internal_node_type(internal_node_type: type) -> Callable:
 def register_leaf_node_type(leaf_node_type: type) -> Callable:
     def _inner(_leaf_node_cls: LeafNode) -> None:
         _LEAF_NODE_TYPE_REGISTRY[leaf_node_type] = _leaf_node_cls
+        return _leaf_node_cls
 
     return _inner
 
