@@ -13,8 +13,8 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 
-import flex_model._distributed_utils as dist
-from flex_model.model_wrappers import FlexModel, HookFunction
+import flex_model.distributed as dist
+from flex_model.core import FlexModel, HookFunction
 
 
 logger = logging.getLogger(__name__)
@@ -44,10 +44,9 @@ def parse_base_model_output_with_past(x):
     return x
 
 
-def dummy_editing_fn_with_log(x, hook_trainable_modules):
+def dummy_editing_fn_with_log(x):
     logger.info(
-        f"Running dummy editing function with hook modules: "
-        f"{hook_trainable_modules}"
+        f"Running dummy editing function on tensor: {x.shape}"
     )
     return x
 

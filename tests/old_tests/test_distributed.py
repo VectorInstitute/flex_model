@@ -10,9 +10,9 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from flex_model.model_wrappers import setup_logger
-from flex_model._traverse_utils import _recursively_find_first_tensor
-from flex_model.tests.testing_utils import (
+from flex_model.utils import setup_logger
+from flex_model.traverse.nodes import _recursively_find_first_tensor
+from tests.old_tests.testing_utils import (
     print_named_modules,
     print_return_dict,
     parse_base_model_output_with_past,
@@ -22,7 +22,7 @@ from flex_model.tests.testing_utils import (
     apply_flex_model_fwd_hooks,
     get_llama_13b_hf,
 )
-from flex_model.tests.testing_constants import (
+from tests.old_tests.testing_constants import (
     _PROMPTS,
     _LLAMA_VANILLA_TORCH_MODULES,
     _FSDP_PREFIX,

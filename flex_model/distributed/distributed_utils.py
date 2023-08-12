@@ -2,6 +2,7 @@ from functools import partial, reduce
 import logging
 from typing import List, Tuple, Callable, Optional
 
+import accelerate
 import torch
 from torch import Tensor
 
