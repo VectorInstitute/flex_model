@@ -15,6 +15,12 @@ from .nodes import (
     ScalarObject,
     ScalarNode,
     InternalNode,
+    is_leaf_obj,
+    is_internal_obj,
+    is_leaf_node,
+    is_internal_node,
+    get_internal_node,
+    get_leaf_node,
 )
 
 

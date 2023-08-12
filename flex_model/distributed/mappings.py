@@ -77,13 +77,15 @@ def all_reduce_sync(
     return inplace_tensor
 
 
-def reduce_rank0_sync(
+def _reduce_rank0_sync(
     tensor: Tensor,
 ) -> Tensor:
     """Synchronous reduce onto rank0.
 
     Reduce is done inplace, but we don't want to destroy the passed
     activation tensor since the model may need it downstream.
+
+    NOTE: Not currently supported officially
     """
     inplace_tensor = tensor.clone()
     torch.distributed.reduce(

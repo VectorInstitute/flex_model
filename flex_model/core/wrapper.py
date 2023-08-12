@@ -61,6 +61,9 @@ class FlexModel(nn.Module):
         self._hook_function_handles: Dict[str, torch.utils.hooks.RemovableHandle] = {}
         self._hooks_active: bool = False
 
+        # TODO: Make this configurable
+        dist.initialize_activation_parallel(list(range(torch.distributed.get_world_size())))
+
     def register_hook_function(
         self,
         hook_function: HookFunction,

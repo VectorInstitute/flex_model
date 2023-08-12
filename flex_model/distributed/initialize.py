@@ -4,33 +4,32 @@ import torch
 from torch import Tensor
 
 
-_GLOBAL_ACTIVATION_GROUP = None
+_ACTIVATION_PARALLEL_GROUP = None
 
 
-def init_activation_parallel_group(ranks: List[int]) -> None:
+def initialize_activation_parallel(ranks: List[int]) -> None:
     """Given a list of ranks, initialize a new `ProcessGroup`"""
-    global _GLOBAL_ACTIVATION_GROUP
+    global _ACTIVATION_PARALLEL_GROUP
 
     assert torch.distributed.get_world_size() >= len(ranks)
-    assert _GLOBAL_ACTIVATION_GROUP is None
+    assert _ACTIVATION_PARALLEL_GROUP is None
 
     act_proc_group = torch.distributed.new_group(
         ranks=ranks,
         backend="nccl",
     )
 
-    _GLOBAL_ACTIVATION_GROUP = act_proc_group
+    _ACTIVATION_PARALLEL_GROUP = act_proc_group
 
 
 def get_activation_parallel_group() -> torch.distributed.ProcessGroup:
     """Return global activation processes group handle."""
-    global _GLOBAL_ACTIVATION_GROUP
-    assert _GLOBAL_ACTIVATION_GROUP is not None
-    return _GLOBAL_ACTIVATION_GROUP
+    global _ACTIVATION_PARALLEL_GROUP
+    return _ACTIVATION_PARALLEL_GROUP
 
 
 def is_initialized() -> bool:
-    return torch.distributed.is_initialized()
+    return _ACTIVATION_PARALLEL_GROUP is not None
 
 
 def get_world_size() -> int:
@@ -50,3 +49,9 @@ def get_rank() -> int:
     return torch.distributed.get_rank(
         group=get_activation_parallel_group(),
     )
+
+
+def destroy_activation_parallel() -> None:
+    """Set the groups to None."""
+    global _ACTIVATION_PARALLEL_GROUP
+    _ACTIVATION_PARALLEL_GROUP = None
