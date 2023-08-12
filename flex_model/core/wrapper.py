@@ -1,3 +1,4 @@
+from argparse import Namespace
 from contextlib import contextmanager
 import logging
 from typing import (
@@ -60,9 +61,9 @@ class FlexModel(nn.Module):
         self._hook_function_handles: Dict[str, torch.utils.hooks.RemovableHandle] = {}
         self._hooks_active: bool = False
 
-        # Globals accessible in hook functions
+        # Globals accessible in hook functions (rank0 only!)
         self.output_ptr = output_ptr
-        self.save_ctx: Dict[Any, Any] = {}
+        self.save_ctx: Namespace = Namespace()  # dumb Namespace for now
         self.trainable_modules = nn.ModuleDict()
 
         # TODO: Make this configurable
@@ -82,7 +83,8 @@ class FlexModel(nn.Module):
     ) -> None:
         """Given user hook reqest, generate hook function and store it."""
         hook_function._output_ptr = self.output_ptr
-        hook_function._save_ctx_ptr = self.save_ctx
+        hook_function.save_ctx = self.save_ctx
+        hook_function.modules = self.trainable_modules
         self.hook_functions[hook_function.module_name] = hook_function
 
     def register_trainable_module(self, name: str, module: nn.Module):

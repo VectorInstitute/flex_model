@@ -1,3 +1,4 @@
+from argparse import Namespace
 import logging
 from typing import (
     List,
@@ -43,6 +44,16 @@ def _parse_dump_from_function(dump_function):
     return dump_function
 
 
+def default_editing_function(
+    current_module: nn.Module,
+    inputs: Tensor,
+    save_ctx: Namespace,
+    modules: nn.ModuleDict,
+) -> Tensor:
+    logger.debug(f"Running default editing function on tensor: {inputs.shape}")
+    return inputs
+
+
 class HookFunction:
     """Respondible for frontend hook function via templating or codegen.
 
@@ -54,13 +65,21 @@ class HookFunction:
         editing_function (Optional[Callable]):
             Optional editing function which will be applied to the activation
             tensor.
+
+            Has signature (current_module, inputs, save_ctx, modules).
+                current_module (nn.Module): Module hooked into.
+                inputs (Tensor): Full activation tensor.
+                save_ctx (Namespace): Global namespace to save state visible
+                    to all hook (and editing) functions.
+                modules (nn.ModuleDict): Global trainable pytorch layers
+                    visible to all hook (and editing) functions.
     """
 
     def __init__(
         self,
         module_name: str,
         expected_shape: Tuple[Optional[int], ...],
-        editing_function: Optional[Callable] = lambda x: x,
+        editing_function: Optional[Callable] = default_editing_function,
     ) -> None:
         self.module_name = module_name
         self.expected_shape = expected_shape
@@ -70,8 +89,10 @@ class HookFunction:
         self._disperse: Optional[Callable] = None
         self._edit: Optional[Callable] = None
         self._dump: Optional[Callable] = None
+
         self._output_ptr: Optional[Dict[str, Tensor]] = None
-        self._save_ctx_ptr: Optional[Dict[Any, Any]] = None
+        self.save_ctx: Optional[Namespace] = None
+        self.modules: Optional[nn.ModuleDict] = None
 
     def _unpack_layer_outputs(
         self,
@@ -146,7 +167,7 @@ class HookFunction:
             # Dump then edit: See V-composition analysis algo
             self._dump(tensor)
 
-        tensor = self._edit(tensor)
+            tensor = self._edit(module, tensor, self.save_ctx, self.modules)
 
         tensor = self._disperse(tensor)
         end_shape = tensor.shape
