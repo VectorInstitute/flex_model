@@ -56,13 +56,25 @@ class FlexModel(nn.Module):
     ):
         super().__init__()
         self.module = module
-        self.output_ptr = output_ptr
         self.hook_functions: Dict[str, HookFunction] = {}
         self._hook_function_handles: Dict[str, torch.utils.hooks.RemovableHandle] = {}
         self._hooks_active: bool = False
 
+        # Globals accessible in hook functions
+        self.output_ptr = output_ptr
+        self.save_ctx: Dict[Any, Any] = {}
+        self.trainable_modules = nn.ModuleDict()
+
         # TODO: Make this configurable
         dist.initialize_activation_parallel(list(range(torch.distributed.get_world_size())))
+
+    def clear_all_state_(self) -> None:
+        """Clear all state aside from wrapped module and output pointer."""
+        self.hook_functions.clear()
+        self._hook_function_handles.clear()
+        self._hooks_active = False
+        self.save_ctx.clear()
+        self.trainable_modules.clear()
 
     def register_hook_function(
         self,
@@ -70,9 +82,23 @@ class FlexModel(nn.Module):
     ) -> None:
         """Given user hook reqest, generate hook function and store it."""
         hook_function._output_ptr = self.output_ptr
+        hook_function._save_ctx_ptr = self.save_ctx
         self.hook_functions[hook_function.module_name] = hook_function
 
+    def register_trainable_module(self, name: str, module: nn.Module):
+        """Register some trainable layers for access by all hook functions."""
+        self.trainable_modules[name] = module
+
+    def wrapped_requires_grad(self, level: bool):
+        """Recursive set requires_grad field on wrapped model parameters."""
+        self.module.requires_grad_(level)
+
+    def trainable_modules_requires_grad(self, level: bool):
+        """Recursive set requires_grad field on trainable layer parameters."""
+        self.trainable_modules.requires_grad_(level)
+
     def set_hooks(self) -> None:
+        """Enable hooks forever."""
         if not self._hooks_active:
             for name, module in self.module.named_modules():
                 if name in self.hook_functions:
@@ -83,6 +109,7 @@ class FlexModel(nn.Module):
             self._hooks_active = True
 
     def remove_hooks(self) -> None:
+        """Disable all hooks."""
         if self._hooks_active:
             for hook in self._hook_function_handles.values():
                 hook.remove()
@@ -144,5 +171,3 @@ class FlexModel(nn.Module):
                 outputs = self.module(*args, **kwargs)
 
         return outputs
-
-

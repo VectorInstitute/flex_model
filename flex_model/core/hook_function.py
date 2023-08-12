@@ -65,13 +65,13 @@ class HookFunction:
         self.module_name = module_name
         self.expected_shape = expected_shape
         self.editing_function = editing_function
-        self.trainable_modules: Dict[str, nn.Module] = {}
 
         self._collect: Optional[Callable] = None
         self._disperse: Optional[Callable] = None
         self._edit: Optional[Callable] = None
         self._dump: Optional[Callable] = None
         self._output_ptr: Optional[Dict[str, Tensor]] = None
+        self._save_ctx_ptr: Optional[Dict[Any, Any]] = None
 
     def _unpack_layer_outputs(
         self,
@@ -103,6 +103,16 @@ class HookFunction:
         self._output_ptr[self.module_name] = dumped_tensor
 
     def _parse_tensor(self, tensor: Tensor) -> None:
+        """Populate collect, disperse, edit and dump functions at runtime.
+
+        The collection, dispersion, edit and dump functions are parsed from
+        known quantities like the tensors in question across workers and the
+        expected shape of the full activation. The collection and dispersion
+        functions require communication to figure out the correct strategy,
+        but this should only run once in the programs lifetime as hook
+        functions retain state during the life of a `FlexModel`. This should
+        also be the only state that is maintained by a hook function.
+        """
         self._collect, self._disperse = dist.parse_collect_and_distribute_from_tensor(
             tensor,
             self.expected_shape,
@@ -146,13 +156,6 @@ class HookFunction:
         assert start_shape == end_shape
 
         return outputs
-
-    def register_trainable_module(self, name: str, module: nn.Module):
-        self.trainable_modules[name] = module
-
-    def requires_grad_(self, level: bool):
-        for module in self.trainable_modules.values():
-            module.requires_grad_(level)
 
     def __call__(
         self,
