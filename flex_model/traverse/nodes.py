@@ -1,7 +1,4 @@
 from __future__ import annotations
-from collections import deque
-from dataclasses import dataclass
-import logging
 from typing import Union, Tuple, List, Any, Dict, Callable, Optional
 
 import torch
@@ -18,47 +15,23 @@ ScalarNode = Any
 
 
 _INTERNAL_NODE_TYPE_REGISTRY: Dict[type, InternalNode] = {}
+_LEAF_NODE_TYPE_REGISTRY: Dict[type, LeafNode] = {}
 
 
 def register_internal_node_type(internal_node_type: type) -> Callable:
     def _inner(_internal_node_cls: InternalNode) -> None:
         _INTERNAL_NODE_TYPE_REGISTRY[internal_node_type] = _internal_node_cls
+        return _internal_node_cls
 
     return _inner
-
-
-_LEAF_NODE_TYPE_REGISTRY: Dict[type, LeafNode] = {}
 
 
 def register_leaf_node_type(leaf_node_type: type) -> Callable:
     def _inner(_leaf_node_cls: LeafNode) -> None:
         _LEAF_NODE_TYPE_REGISTRY[leaf_node_type] = _leaf_node_cls
+        return _leaf_node_cls
 
     return _inner
-
-
-def get_internal_node(internal_obj: InternalObject) -> InternalNode:
-    return _INTERNAL_NODE_TYPE_REGISTRY[type(internal_obj)]
-
-
-def get_leaf_node(leaf_obj: LeafObject) -> LeafNode:
-    return _LEAF_NODE_TYPE_REGISTRY[type(leaf_obj)]
-
-
-# TODO: Deprecate in favour of _flatten
-def _recursively_find_first_tensor(
-    obj: Union[InternalObject, LeafObject, ScalarObject]
-) -> Optional[Tensor]:
-    if is_leaf_obj(obj):
-        return obj
-
-    if not is_internal_obj(obj):
-        return
-
-    for ele in obj:
-        res = _recursively_find_first_tensor(ele)
-        if res is not None:
-            return res
 
 
 class InternalNode:
@@ -202,6 +175,30 @@ class TensorNode(LeafNode):
         return f"TensorNode<{self.val}>"
 
 
+def get_internal_node(internal_obj: InternalObject) -> InternalNode:
+    return _INTERNAL_NODE_TYPE_REGISTRY[type(internal_obj)]
+
+
+def get_leaf_node(leaf_obj: LeafObject) -> LeafNode:
+    return _LEAF_NODE_TYPE_REGISTRY[type(leaf_obj)]
+
+
+# TODO: Deprecate in favour of _flatten
+def _recursively_find_first_tensor(
+    obj: Union[InternalObject, LeafObject, ScalarObject]
+) -> Optional[Tensor]:
+    if is_leaf_obj(obj):
+        return obj
+
+    if not is_internal_obj(obj):
+        return
+
+    for ele in obj:
+        res = _recursively_find_first_tensor(ele)
+        if res is not None:
+            return res
+
+
 def is_leaf_obj(obj: Any) -> bool:
     """Return true if the object corresponds to a leaf node."""
     return type(obj) in _LEAF_NODE_TYPE_REGISTRY
@@ -220,69 +217,3 @@ def is_leaf_node(node: Any) -> bool:
 def is_internal_node(node: Any) -> bool:
     """Return true if the object is an internal node."""
     return isinstance(node, InternalNode)
-
-
-def _flatten(
-    root_obj: Any,
-) -> Tuple[Union[InternalNode, LeafNode, ScalarNode], List[Optional[Tensor]]]:
-    order = []
-    leaves = []
-
-    def _dfs(obj):
-        # Leaf obj case
-        if is_leaf_obj(obj):
-            leaf_node = get_leaf_node(obj)(val=obj.shape)
-            order.append(leaf_node)
-            leaves.append(obj)
-            return leaf_node
-
-        # Internal obj recursive case
-        elif is_internal_obj(obj):
-            # NOTE: Each node needs to know how to flatten its associated type
-            #       instance. Ie. BaseModelOutputWithPast needs to be able to
-            #       return its attributes in a tuple. They should also be able
-            #       to perfectly recreate instances of themselves using a list of
-            #       children.
-            internal_node = get_internal_node(obj)()
-            order.append(internal_node)
-
-            # Internal node knows how to unpack its equivalent internal object
-            unvisited_children = internal_node.flatten(obj)
-
-            # Recurse into internal object's children
-            for child in unvisited_children:
-                internal_node.children.append(_dfs(child))
-            return internal_node
-
-        # Scalar obj case
-        else:
-            # Scalar nodes are just objects
-            scalar_node = obj
-            order.append(scalar_node)
-            return scalar_node
-
-    _dfs(root_obj)
-    return order[0], leaves
-
-
-def _unflatten(
-    root_node: Union[InternalNode, LeafNode, ScalarNode], leaves: List[Optional[Tensor]]
-) -> Any:
-    leaves = list(reversed(leaves))
-
-    def _dfs(node):
-        # Leaf node case
-        if is_leaf_node(node):
-            return leaves.pop()
-
-        # Internal node case
-        elif is_internal_node(node):
-            # Node knows how to pack itself up again into its corresponding obj
-            obj = node.unflatten(_dfs(child) for child in node.children)
-            return obj
-
-        # Scalar node case
-        else:
-            return node
-
-    return _dfs(root_node)
