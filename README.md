@@ -17,57 +17,58 @@ classes.
 ```
 from flex_model import FlexModel, HookFunction
 
-# We will use the model and tokenizer from fairscale's llama
-generator = load_llama(...)
-model = generator.model
-tokenizer = generator.tokenizer
+# Load some model
+model = ...
+inputs = ...
 
 # Activations will be dumped here
 output_dict = {}
 
-# Wrap the llama model
+# Wrap the model
 model = FlexModel(model, output_dict)
-
-# Note: Try to use huggingface tokenizer since it dumps directly into a torch
-#		tensor, else you'll have to do it manually.
-inputs = tokenizer(...)
 
 # Only need to provide a shape hint on the dimension which may be sharded
 # across gpus.
-expected_shape = (None, None, 13824)
+# (batch, sequence, hidden) -> sharded along hidden
+expected_shape = (None, None, hidden_dim)
 
-# Hook function requires:
-#	- A module to retrieve outputs from
-#	- The expected shape of the activation
-#	- Optionally an editing function (2nd input arg is for having trainable
-#	  modules in the hook function)
+# Define a hook function
+def editing_function(current_module, inputs, save_ctx, modules) -> Tensor
+	# Save input activation tensor for later use
+	save_ctx.activation = inputs
+
+	# Edit the activation tensor
+	edited_activations = inputs * 2
+
+	# Apply torch.nn.Modules to the activation tensor (can generate grads)
+	edited_activations = modules["mlp"].forward(edited_activations)
+
+	return edited_activations
+	
+# Create hook function
 hook_function = HookFunction(
 	module_name="layers.7.feed_forward.w1",
 	expected_shape=expected_shape,
-	editing_function=lambda x, _: x * 2,
+	editing_function=editing_function,
 )
 
+# Register the hook function into our model
 flex_model.register_hook_function(hook_function)
 
-# Run the hooked forward pass. Activations will be available in the output_dict
-# after the forward pass is complete
+# Run a forward pass, activations will be placed in the output_dict
 model.forward(inputs)
 ```
 
 # Running Tests
-`cd flex_model/tests`
-
-`python test_single_gpu.py`
-
-`accelerate launch test_distributed.py` <- Make sure this is run on 2 GPUs
-
+Use `torchrun` to run all of the tests requiring distributed. Else you can just
+use `python3`. All distributed tests were done on 2 GPUs.
 ```
 torchrun --nnodes 1 \
 	--nproc_per_node 2 \
 	--rdzv_id 6969 \
 	--rdzv_backend c10d \
 	--rdzv_endpoint <gpuXXX> \
-	--test_megatron.py
+	--test_<name>.py
 ```
 
 # Running TunedLens
