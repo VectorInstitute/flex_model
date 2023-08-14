@@ -24,6 +24,7 @@ from flex_model.traverse import (
     flatten,
     unflatten,
 )
+from flex_model.distributed.mappings import unity
 
 
 LayerOutputs = Union[InternalObject, LeafObject, ScalarObject]
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 def _parse_edit_from_function(edit_function):
     """Parse the user-provided editing function."""
     if edit_function is None:
-        parsed_edit_function = _unity
+        parsed_edit_function = default_editing_function
     else:
         parsed_edit_function = edit_function
     return parsed_edit_function
@@ -79,7 +80,7 @@ class HookFunction:
         self,
         module_name: str,
         expected_shape: Tuple[Optional[int], ...],
-        editing_function: Optional[Callable] = default_editing_function,
+        editing_function: Optional[Callable] = None,
     ) -> None:
         self.module_name = module_name
         self.expected_shape = expected_shape

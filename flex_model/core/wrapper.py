@@ -67,7 +67,8 @@ class FlexModel(nn.Module):
         self.trainable_modules = nn.ModuleDict()
 
         # TODO: Make this configurable
-        dist.initialize_activation_parallel(list(range(torch.distributed.get_world_size())))
+        if torch.distributed.is_initialized():
+            dist.initialize_activation_parallel(list(range(torch.distributed.get_world_size())))
 
     def clear_all_state_(self) -> None:
         """Clear all state aside from wrapped module and output pointer."""
