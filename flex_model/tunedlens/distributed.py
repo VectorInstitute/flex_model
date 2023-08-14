@@ -27,10 +27,14 @@ def initialize_lens_model_parallel(
     )
 
 
+def is_initialized():
+    global LENS_MODEL_PARALLEL_GROUP
+    return LENS_MODEL_PARALLEL_GROUP is not None
+
+
 def get_lens_model_parallel_group() -> dist.ProcessGroup:
     """Return the lens model parallel group."""
     global LENS_MODEL_PARALLEL_GROUP
-    assert LENS_MODEL_PARALLEL_GROUP is not None
     return LENS_MODEL_PARALLEL_GROUP
 
 

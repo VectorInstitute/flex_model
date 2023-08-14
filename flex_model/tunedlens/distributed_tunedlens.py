@@ -94,8 +94,9 @@ class Translators(nn.Module):
         self.num_layers = num_layers
 
         # Translators init to identity
-        linear = torch.eye(hidden_dim, dtype=torch.bfloat16)[None, :]
-        linear = linear.tile((num_layers, 1, 1))
+        # NOTE: eye not implemented for bfloat16
+        linear = torch.eye(hidden_dim, dtype=torch.float16)[None, :]
+        linear = linear.tile((num_layers, 1, 1)).to(torch.bfloat16)
         self.translators = nn.parameter.Parameter(linear, requires_grad=True)
 
         # Bias init like regular affine layer bias
@@ -319,7 +320,9 @@ class DistributedTunedLens(nn.Module):
         activations = torch.chunk(activations, chunks, dim=0)
 
         # Create loss mask (layer, batch, seq, hidden)
-        mask = (batch != 0)[None, :, :, None].cuda()
+        # TODO: Make this configurable
+        pad_id = 0
+        mask = (batch != pad_id)[None, :, :, None].cuda()
 
         # Stream the loss calculation to avoid expanding vocab size activation
         # across num_layers
