@@ -1,3 +1,4 @@
+import argparse
 from typing import Dict
 
 import torch
@@ -7,12 +8,22 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from flex_model.core import FlexModel, HookFunction
 
 
-def main():
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf")
+    parser.add_argument("--tokenizer_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf")
+    args = parser.parse_args()
+    return args
+
+
+def main(args):
     """Single forward pass of llama-2-13b-hf model retrieving a single activation.
+
+    This script runs on a single GPU only.
     """
     # Load llama-2-13b-hf model
     model = AutoModelForCausalLM.from_pretrained(
-        "/ssd005/projects/llm/llama-2-13b-hf",
+        args.checkpoint_dir,
         local_files_only=True,
         torch_dtype="auto",
         device_map="auto",
@@ -20,7 +31,7 @@ def main():
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
-        "/ssd005/projects/llm/llama-2-13b-hf",
+        args.tokenizer_dir,
         local_files_only=True,
     )
 
@@ -52,4 +63,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)

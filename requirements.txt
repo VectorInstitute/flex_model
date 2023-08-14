@@ -3,3 +3,4 @@ sentencepiece
 tokenizers
 torch
 transformers
+fairscale
