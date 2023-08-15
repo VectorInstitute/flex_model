@@ -221,7 +221,10 @@ def main(args):
                     accelerator.print(f"Train loss at iter {i}: {train_loss}")
 
                 optimizer.step()
-                lr_scheduler.step()
+                # NOTE: Scheduler steps every iteration regardless of grad acc.
+                #       steps, but optimizer steps fine.
+                if i % gradient_acumulation_size == 0 and i != 0:
+                    lr_scheduler.step()
                 progress_bar.update(1)
 
 
