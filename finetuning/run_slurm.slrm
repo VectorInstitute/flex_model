@@ -1,0 +1,30 @@
+#!/bin/bash
+#SBATCH --job-name=llama7b-2
+#SBATCH --nodes=2
+#SBATCH --mem=0
+#SBATCH --ntasks-per-node=1 
+#SBATCH --cpus-per-gpu=6
+#SBATCH --gres=gpu:4
+#SBATCH --output=llama-2-7b.%j.out
+#SBATCH --error=llama-2-7b.%j.err
+#SBATCH --partition=a100
+#SBATCH --qos=normal
+#SBATCH --open-mode=append
+#SBATCH --wait-all-nodes=1
+
+# Cluster-specific flags
+export NCCL_IB_DISABLE=1
+export NCCL_DEBUG=INFO
+
+export MASTER_ADDR="$(hostname -I | awk '{print $1}')"
+export MASTER_PORT="$(python -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1])')"
+
+for index in $(seq 0 $(($SLURM_NTASKS-1))); do
+    echo "Node $index launched"
+    srun -lN$index --mem=0 --gres=gpu:4 -c $SLURM_CPUS_ON_NODE -N 1 -n 1 -r $index bash -c "accelerate launch --mixed_precision bf16 --num_processes 8 --num_machines 2 --use_fsdp \
+--same_network --machine_rank $index --main_process_ip $MASTER_ADDR --main_process_port $MASTER_PORT --fsdp_sharding_strategy 1 --fsdp_auto_wrap_policy TRANSFORMER_BASED_WRAP \
+--fsdp_transformer_layer_cls_to_wrap LlamaDecoderLayer --fsdp_backward_prefetch_policy BACKWARD_PRE \
+--fsdp_state_dict_type FULL_STATE_DICT main.py --output_dir /checkpoint/opt_test/original/clinical_llm/llama-2-7b-ft-mdpi-mtb/" &
+done
+
+wait
