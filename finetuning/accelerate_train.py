@@ -84,7 +84,7 @@ def main(args):
     #       from slurm environment variables.
     num_processes = torch.cuda.device_count()
     gradient_accumulation_size = args.global_batch_size // args.local_batch_size * num_processes
-    #accelerator = Accelerator(gradient_accumulation_size)
+    accelerator = Accelerator(gradient_accumulation_size)
 
     # Load model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(
@@ -121,8 +121,6 @@ def main(args):
             padding="max_length",
             return_tensors="pt",
         )
-
-    breakpoint()
 
     # Load dataloaders from wikitext103 dataset
     train_dataloader, val_dataloader, test_dataloader = get_wikitext103_dataloaders(
@@ -199,14 +197,17 @@ def main(args):
 
                 outputs = model(**batch)
 
+                # Sanity check on predictions
+                """
                 if accelerator.is_main_process:
                     accelerator.print(
                         tokenizer.decode(outputs.logits[0].argmax(-1).tolist())
                     )
-                    accelerator.print("*" * 50)
+                    accelerator.print("*" * 200)
                     accelerator.print(
                         tokenizer.decode(batch["input_ids"][0].tolist())
                     )
+                """
 
                 loss = outputs.loss
 

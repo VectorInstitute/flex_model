@@ -3,6 +3,7 @@
 
 # python
 __pycache__/
+.mypy_cache/
 
 *.egg-info/
 
