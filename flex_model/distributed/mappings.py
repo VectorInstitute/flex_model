@@ -23,6 +23,9 @@ def broadcast_rank0_sync(
     tensor: Tensor,
 ) -> Tensor:
     """Synchronous broadcast from rank0."""
+    if get_world_size() == 0:
+        return tensor
+
     torch.distributed.broadcast(
         tensor=tensor,
         src=0,
@@ -67,6 +70,9 @@ def all_reduce_sync(
     tensor: Tensor,
 ) -> Tensor:
     """Synchronous allreduce."""
+    if get_world_size == 0:
+        return tensor
+
     inplace_tensor = tensor.clone()
     torch.distributed.all_reduce(
         tensor=inplace_tensor,
@@ -87,6 +93,9 @@ def _reduce_rank0_sync(
 
     NOTE: Not currently supported officially
     """
+    if get_world_size == 0:
+        return tensor
+
     inplace_tensor = tensor.clone()
     torch.distributed.reduce(
         tensor=inplace_tensor,
