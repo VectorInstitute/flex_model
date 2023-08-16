@@ -15,6 +15,8 @@ from .mappings import (
 )
 from .parse import parse_collect_and_distribute_from_tensor
 from .distributed_utils import (
-    accelerate_distributed_is_initialized,
     print_rank0,
+)
+from .hf_accelerate_backend import (
+    accelerate_is_initialized
 )

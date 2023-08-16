@@ -54,6 +54,7 @@ class FlexModel(nn.Module):
         self,
         module: nn.Module,
         output_ptr: Dict[str, Tensor],
+        _override_world_size: int = 0,
     ):
         super().__init__()
         self.module = module
@@ -66,9 +67,10 @@ class FlexModel(nn.Module):
         self.save_ctx: Namespace = Namespace()  # dumb Namespace for now
         self.trainable_modules = nn.ModuleDict()
 
-        # TODO: Make this configurable
+        # TODO: Make this configurable, especially for TP+PP use cases
         if torch.distributed.is_initialized():
-            dist.initialize_activation_parallel(list(range(torch.distributed.get_world_size())))
+            parallel_size = list(range(torch.distributed.get_world_size()))
+            dist.initialize_activation_parallel(parallel_size)
 
     def clear_all_state_(self) -> None:
         """Clear all state aside from wrapped module and output pointer."""

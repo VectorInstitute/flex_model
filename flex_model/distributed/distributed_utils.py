@@ -14,18 +14,6 @@ from flex_model.distributed.initialize import (
 logger = logging.getLogger(__name__)
 
 
-def accelerate_distributed_is_initialized():
-    ps = accelerate.PartialState()
-    if (
-        ps.distributed_type == accelerate.DistributedType.MULTI_GPU
-        or ps.distributed_type == accelerate.DistributedType.FSDP
-        or ps.distributed_type == accelerate.DistributedType.MEGATRON_LM
-    ):
-        return True
-    else:
-        return False
-
-
 def print_rank0(msg: str) -> None:
     """Print to rank 0 worker."""
     if is_initialized() and get_rank() == 0:
