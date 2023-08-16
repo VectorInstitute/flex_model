@@ -39,8 +39,6 @@ def test_save_ctx():
     model, tokenizer = make_model_and_tokenizer()
     model = accelerator.prepare(model)
 
-    logger.info(f"Torch rank{torch.distributed.get_rank()}: {torch.distributed.is_initialized()}")
-
     activations = {}
     model = FlexModel(model, activations)
 
