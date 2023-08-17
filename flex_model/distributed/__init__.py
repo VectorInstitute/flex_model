@@ -1,22 +1,25 @@
-from .initialize import (
+from .distributed_api import (
+    initialize_distributed_backend,
+    distributed_backend_is_initialized,
+    destroy_distributed_backend,
     initialize_activation_parallel,
-    get_activation_parallel_group,
-    is_initialized,
-    get_world_size,
-    get_rank,
+    activation_parallel_is_initialized,
+    get_activation_tensor_parallel_group,
+    get_activation_data_parallel_group,
+    get_activation_tensor_parallel_world_size,
+    get_activation_data_parallel_world_size,
+    get_activation_tensor_parallel_rank,
+    get_activation_data_parallel_rank,
     destroy_activation_parallel,
 )
 from .mappings import (
     unity,
-    broadcast_rank0_sync,
-    all_gather_sync,
-    all_reduce_sync,
-    scatter_rank0_sync,
+    broadcast_tensor_parallel,
+    broadcast_data_parallel,
+    all_gather_tensor_parallel,
+    all_gather_data_parallel,
+    all_reduce_tensor_parallel,
+    scatter_tensor_parallel,
+    scatter_data_parallel,
 )
 from .parse import parse_collect_and_distribute_from_tensor
-from .distributed_utils import (
-    print_rank0,
-)
-from .hf_accelerate_backend import (
-    accelerate_is_initialized
-)

@@ -54,7 +54,9 @@ class FlexModel(nn.Module):
         self,
         module: nn.Module,
         output_ptr: Dict[str, Tensor],
-        _override_world_size: int = 0,
+        tensor_parallel_size: int = 1,
+        pipeline_parallel_size: int = 1,
+        data_parallel_size: int = 1,
     ):
         super().__init__()
         self.module = module
@@ -67,10 +69,22 @@ class FlexModel(nn.Module):
         self.save_ctx: Namespace = Namespace()  # dumb Namespace for now
         self.trainable_modules = nn.ModuleDict()
 
-        # TODO: Make this configurable, especially for TP+PP use cases
+        self.tp_world_size = tensor_parallel_size
+        self.pp_world_size = pipeline_parallel_size
+        self.dp_world_size = data_parallel_size
+
         if torch.distributed.is_initialized():
-            parallel_size = list(range(torch.distributed.get_world_size()))
-            dist.initialize_activation_parallel(parallel_size)
+            # Initialize the proper distributed backend (ie. torch, accelerate,
+            # etc.)
+            dist.initialize_distributed_backend(
+                torch.distributed.get_world_size(),
+                self.tp_world_size,
+                self.pp_world_size,
+                self.dp_world_size,
+            )
+
+            # Initialize the activation parallel distributed process groups
+            dist.initialize_activation_parallel()
 
     def clear_all_state_(self) -> None:
         """Clear all state aside from wrapped module and output pointer."""
@@ -79,6 +93,8 @@ class FlexModel(nn.Module):
         self._hooks_active = False
         self.save_ctx.clear()
         self.trainable_modules.clear()
+        dist.destroy_activation_parallel()
+        dist.destroy_distributed_backend()
 
     def register_hook_function(
         self,
@@ -162,6 +178,8 @@ class FlexModel(nn.Module):
         collect_fn, _ = dist.parse_collect_and_distribute_from_tensor(
             local_param,
             expected_shape,
+            self.tp_world_size,
+            self.dp_world_size,
         )
         full_param = collect_fn(local_param).cpu()
         return full_param

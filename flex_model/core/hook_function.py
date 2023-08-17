@@ -135,9 +135,18 @@ class HookFunction:
         functions retain state during the life of a `FlexModel`. This should
         also be the only state that is maintained by a hook function.
         """
+        if dist.activation_parallel_is_initialized():
+            tp_world_size = dist.get_activation_tensor_parallel_world_size()
+            dp_world_size = dist.get_activation_data_parallel_world_size()
+        else:
+            tp_world_size = 1
+            dp_world_size = 1
+
         self._collect, self._disperse = dist.parse_collect_and_distribute_from_tensor(
             tensor,
             self.expected_shape,
+            tp_world_size,
+            dp_world_size,
         )
 
         self._edit = _parse_edit_from_function(self.editing_function)
@@ -162,8 +171,11 @@ class HookFunction:
 
         tensor = self._collect(tensor)
 
-        if not dist.is_initialized() or (
-            dist.is_initialized() and dist.get_rank() == 0
+        # Rank0 is the only one to save and edit the activation
+        if not dist.activation_parallel_is_initialized() or (
+            dist.activation_parallel_is_initialized() and
+            dist.get_activation_tensor_parallel_rank() == 0 and
+            dist.get_activation_data_parallel_rank() == 0
         ):
             # Dump then edit: See V-composition analysis algo
             self._dump(tensor)

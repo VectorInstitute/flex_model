@@ -1,28 +1,14 @@
-from __future__ import annotations
-from dataclasses import dataclass
-from typing import List
-
-import torch
-import torch.distributed as pt_dist
-import accelerate
-from accelerate import PartialState
-
-from flex_model.distributed.backends import (
-    DistributedBackend,
-    TorchDistributedBackend,
-    AccelerateDistributedBackend,
-    GPUDeviceMesh,
-)
-
-
 """Backend-agnostic distributed launch and teardown.
 
 User has some model on 1+ GPUs, using some sort of distributed backed
 (typically accelerate or torch distributed). First find out which
 backend is being used in the __init__method of the core `FlexModel` class.
 
-Note: We always assume distributed backend is initialized already, ie. torch
-has already called `init_process_groups`.
+Notes:
+- We always assume distributed backend is initialized already, ie. torch
+  has already called `init_process_groups`.
+- Additionally, we leave primitives like `torch.dsitributed.get_rank()` to
+  torch instead of wrapping them.
 
 Flow:
 -> FlexModel.__init__: Call to initialize_distributed_backend(...)
@@ -40,12 +26,31 @@ Flow:
                 global ACTIVE_BACKEND
                 return ACTIVE_BACKEND.init_act_parallel()
 """
+from __future__ import annotations
+from dataclasses import dataclass
+import logging
+from typing import List, Optional
+
+import torch
+import torch.distributed as pt_dist
+import accelerate
+from accelerate import PartialState
+
+from flex_model.distributed.backends import (
+    DistributedBackend,
+    TorchDistributedBackend,
+    AccelerateDistributedBackend,
+    GPUDeviceMesh,
+)
+
 
 _SUPPORTED_BACKENDS = {
     "torch": TorchDistributedBackend,
     "accelerate": AccelerateDistributedBackend,
 }
-_ACTIVE_BACKEND = None
+_ACTIVE_BACKEND: Optional[DistributedBackend] = None
+
+logger = logging.getLogger(__name__)
 
 
 def initialize_distributed_backend(
@@ -56,23 +61,43 @@ def initialize_distributed_backend(
 ):
     """Main entry point from `FlexModel` to initialize distributed backend."""
     assert world_size == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
-    backend_cls = parse_backend()
+    backend_cls = _parse_backend()
+    logger.debug(f"Using DistributedBackend: {backend_cls.__name__}")
+
     device_mesh = GPUDeviceMesh.build(
         world_size,
         tensor_parallel_size,
         pipeline_parallel_size,
         data_parallel_size,
     )
+    logger.debug(
+        f"Initialized GPUDeviceMesh with group ranks: "
+        f"TP: {device_mesh.tp_group_ranks}, "
+        f"DP: {device_mesh.dp_group_ranks}"
+    )
+
     backend = backend_cls(device_mesh)
-    expose_distributed_backend(backend)
+    _expose_distributed_backend(backend)
 
 
-def parse_backend():
+def distributed_backend_is_initialized():
+    global _ACTIVE_BACKEND
+    return _ACTIVE_BACKEND is not None
+
+
+def destroy_distributed_backend():
+    global _ACTIVE_BACKEND
+    _ACTIVE_BACKEND = None
+
+
+def _parse_backend():
+    """Figure out what distributed backend to use given current distributed state."""
     global _SUPPORTED_BACKENDS
 
     ps = PartialState()
+
     if (
-        ps.distributed_type == accelerate.DistributedType.MULTI_GPU or
+        ps.distributed_type == accelerate.DistributedType.DEEPSPEED or
         ps.distributed_type == accelerate.DistributedType.FSDP or
         ps.distributed_type == accelerate.DistributedType.MEGATRON_LM
     ):
@@ -81,12 +106,12 @@ def parse_backend():
         hf_distributed = False
 
     # Using huggingface accelerate with torch
-    if torch.distributed.is_initialized() and hf_distributed():
+    if torch.distributed.is_initialized() and hf_distributed:
         return _SUPPORTED_BACKENDS["accelerate"]
 
     # Using torch distributed only. Single-gpu case is covered by torch
     # backend.
-    elif (torch.distributed.is_initialized() and not hf_distributed() or
+    elif (torch.distributed.is_initialized() and not hf_distributed or
           not torch.distributed.is_initialized()):
         return _SUPPORTED_BACKENDS["torch"]
 
@@ -95,21 +120,70 @@ def parse_backend():
         raise NotImplementedError("Distributed backend currently not supported.")
 
 
-def expose_distributed_backend(backend: DistributedBackend):
+def _expose_distributed_backend(backend: DistributedBackend):
+    """Set the global distributed backend."""
     global _ACTIVE_BACKEND
     _ACTIVE_BACKEND = backend
 
 
 def initialize_activation_parallel() -> None:
+    """Initialize activation parallel distributed groups."""
     global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
     _ACTIVE_BACKEND.initialize_activation_parallel()
 
 
 def activation_parallel_is_initialized() -> bool:
+    """Check if activation parallel distributed groups have been initialized."""
     global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
     return _ACTIVE_BACKEND.activation_parallel_is_initialized()
 
 
-def get_activation_tensor_parallel_world_size() -> int:
+def get_activation_tensor_parallel_group() -> pt_dist.ProcessGroup:
+    """Get the activation parallel tp group."""
     global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.get_activation_tensor_parallel_group()
+
+
+def get_activation_data_parallel_group() -> Optional[pt_dist.ProcessGroup]:
+    """Get the activation parallel dp group."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.get_activation_data_parallel_group()
+
+
+def get_activation_tensor_parallel_world_size() -> int:
+    """Get the activation parallel tp group world size."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
     return _ACTIVE_BACKEND.get_activation_tensor_parallel_world_size()
+
+
+def get_activation_data_parallel_world_size() -> int:
+    """Get the activation parallel dp group world size."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.get_activation_data_parallel_world_size()
+
+
+def get_activation_tensor_parallel_rank() -> int:
+    """Get the activation parallel tp group world size."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.get_activation_tensor_parallel_rank()
+
+
+def get_activation_data_parallel_rank() -> int:
+    """Get the data parallel dp group world size."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.get_activation_data_parallel_rank()
+
+
+def destroy_activation_parallel() -> None:
+    """Destroy the activation parallel groups."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    _ACTIVE_BACKEND.destroy_activation_parallel()
