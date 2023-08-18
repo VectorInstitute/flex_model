@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import logging
 from typing import List, Optional
 
+import torch
 import torch.distributed as pt_dist
 from accelerate import PartialState
 
@@ -58,28 +59,34 @@ class GPUDeviceMesh:
             return cls([[0]], [[0]], [[0]])
 
         num_tp_groups = world_size // tensor_parallel_size
-        num_pp_groups = 0   # Don't need to consider pp
-        num_dp_groups = 1   # Only need one dp group
+        num_pp_groups = pipeline_parallel_size
+        num_dp_groups = pipeline_parallel_size
 
+        mesh = torch.arange(world_size).reshape(
+            data_parallel_size,
+            pipeline_parallel_size,
+            tensor_parallel_size,
+        )
         # Build tensor parallel groups
         tp_group_ranks: List[List[int]] = []
-        stride = 1
-        for i in range(num_tp_groups):
-            offset = i * tensor_parallel_size
-            ranks = [offset + stride * j for j in range(tensor_parallel_size)]
-            tp_group_ranks.append(ranks)
+        for ranks in mesh.view(-1, tensor_parallel_size):
+            tp_group_ranks.append(ranks.tolist())
 
         # Build data parallel groups
         dp_group_ranks: List[List[int]] = []
-        stride = pipeline_parallel_size
         for i in range(num_dp_groups):
-            offset = i
-            ranks = []
-            for j in range(data_parallel_size):
-                ranks.append(tp_group_ranks[offset + stride * j][0])
-            dp_group_ranks.append(ranks)
+            dp_group_ranks.append(mesh[:, i, 0].tolist())
 
-        return cls(tp_group_ranks, [[]], dp_group_ranks)
+        # Build pipeline parallel groups
+        pp_group_ranks: List[List[int]] = []
+        ranks = mesh[0, :, 0]
+        for i in range(num_pp_groups):
+            if i == 0:
+                pp_group_ranks.append([0])
+            else:
+                pp_group_ranks.append([0, ranks[i].tolist()])
+
+        return cls(tp_group_ranks, pp_group_ranks, dp_group_ranks)
 
 
 class DistributedBackend(ABC):
@@ -92,11 +99,15 @@ class DistributedBackend(ABC):
         ...
 
     @abstractmethod
-    def get_activation_tensor_parallel_group(self) -> pt_dist.ProcessGroup:
+    def get_activation_tensor_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
         ...
 
     @abstractmethod
     def get_activation_data_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+        ...
+
+    @abstractmethod
+    def get_activation_pipeline_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
         ...
 
     @abstractmethod
@@ -108,11 +119,19 @@ class DistributedBackend(ABC):
         ...
 
     @abstractmethod
+    def get_activation_pipeline_parallel_world_size(self) -> int:
+        ...
+
+    @abstractmethod
     def get_activation_tensor_parallel_rank(self) -> int:
         ...
 
     @abstractmethod
     def get_activation_data_parallel_rank(self) -> int:
+        ...
+
+    @abstractmethod
+    def get_activation_pipeline_parallel_rank(self) -> int:
         ...
 
     @abstractmethod
@@ -151,22 +170,34 @@ class TorchDistributedBackend(DistributedBackend):
                 self.dp_group = group
                 logger.debug(f"Torch rank {pt_dist.get_rank()} init DP group: {group_ranks}")
             self.all_dp_groups.append(group_ranks)
-        self.__repr__()
+
+        # Construct pp groups
+        self.all_pp_groups = []
+        for group_ranks in self.device_mesh.pp_group_ranks:
+            group = pt_dist.new_group(group_ranks)
+            if rank in group_ranks:
+                self.pp_group = group
+                logger.debug(f"Torch rank {pt_dist.get_rank()} init PP group: {group_ranks}")
+            self.all_pp_groups.append(group_ranks)
 
     def activation_parallel_is_initialized(self) -> bool:
         # DP groups only active on group rank0 TP workers, so this is
         # intersection not union
-        if self.tp_group is None and self.dp_group is None:
+        if self.tp_group is None and self.dp_group is None and self.pp_group is None:
             return False
         return True
 
-    def get_activation_tensor_parallel_group(self) -> pt_dist.ProcessGroup:
+    def get_activation_tensor_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
         assert self.activation_parallel_is_initialized()
         return self.tp_group
 
     def get_activation_data_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
         assert self.activation_parallel_is_initialized()
         return self.dp_group
+
+    def get_activation_pipeline_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+        assert self.activation_parallel_is_initialized()
+        return self.pp_group
 
     def get_activation_tensor_parallel_world_size(self) -> int:
         assert self.activation_parallel_is_initialized()
@@ -176,6 +207,10 @@ class TorchDistributedBackend(DistributedBackend):
         assert self.activation_parallel_is_initialized()
         return pt_dist.get_world_size(group=self.dp_group)
 
+    def get_activation_pipeline_parallel_world_size(self) -> int:
+        assert self.activation_parallel_is_initialized()
+        return pt_dist.get_world_size(group=self.pp_group)
+
     def get_activation_tensor_parallel_rank(self) -> int:
         assert self.activation_parallel_is_initialized()
         return pt_dist.get_rank(group=self.tp_group)
@@ -183,6 +218,10 @@ class TorchDistributedBackend(DistributedBackend):
     def get_activation_data_parallel_rank(self) -> int:
         assert self.activation_parallel_is_initialized()
         return pt_dist.get_rank(group=self.dp_group)
+
+    def get_activation_pipeline_parallel_rank(self) -> int:
+        assert self.activation_parallel_is_initialized()
+        return pt_dist.get_rank(group=self.pp_group)
 
     def destroy_activation_parallel(self) -> None:
         self.all_tp_groups = None

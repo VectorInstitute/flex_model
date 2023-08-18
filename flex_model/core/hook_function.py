@@ -124,6 +124,14 @@ class HookFunction:
         dumped_tensor = activation.detach().cpu()
         self._output_ptr[self.module_name] = dumped_tensor
 
+    def _pipelined_bind_tensor_to_cpu_output(self, activation: Tensor) -> None:
+        """Bind the activation tensor to the output dict and send it to rank0.
+
+        This is especially useful in the case pipeline parallel size > 1. If we
+        just dump the activation tensor to cpu
+        """
+        raise NotImplementedError
+
     def _parse_tensor(self, tensor: Tensor) -> None:
         """Populate collect, disperse, edit and dump functions at runtime.
 

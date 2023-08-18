@@ -73,6 +73,7 @@ def initialize_distributed_backend(
     logger.debug(
         f"Initialized GPUDeviceMesh with group ranks: "
         f"TP: {device_mesh.tp_group_ranks}, "
+        f"PP: {device_mesh.pp_group_ranks}, "
         f"DP: {device_mesh.dp_group_ranks}"
     )
 
