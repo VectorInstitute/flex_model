@@ -42,7 +42,8 @@ def test_MegatronLayers():
 def test_FlexModelMegatron():
     setup_logger("debug")
 
-    Utils.initialize_model_parallel()
+    Utils.initialize_model_parallel(2, 1, 2)
+    Utils.initialize_distributed_backend(2, 1, 2)
     Utils.initialize_activation_parallel()
 
     torch.manual_seed(42069)
@@ -64,7 +65,13 @@ def test_FlexModelMegatron():
     Utils.destroy_activation_parallel()
 
     output_dict = {}
-    model = FlexModel(model, output_dict)
+    model = FlexModel(
+        model,
+        output_dict,
+        tensor_parallel_size=2,
+        pipeline_parllel_size=1,
+        data_parallel_size=2,
+    )
     print(model)
     hook_functions = {
         "vocab_parallel_embedding": (None, None, hidden_dim),
@@ -97,6 +104,7 @@ def test_FlexModelMegatron():
         logger.info("Tests successful.")
 
     Utils.destroy_activation_parallel()
+    Utils.destroy_distributed_backend()
     Utils.destroy_model_parallel()
 
 

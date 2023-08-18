@@ -118,6 +118,7 @@ def all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
         group=tp_group,
         async_op=False,
     )
+
     return tensor
 
 def scatter_tensor_parallel(tensor: Tensor, dim: int = -1):
@@ -144,4 +145,17 @@ def scatter_data_parallel(tensor: Tensor, dim: int = 0):
     input_list = torch.chunk(tensor, dp_world_size, dim=dim)
     output_tensor = input_list[dp_rank].contiguous()
 
+    logger.debug(f"Scatter | IN: {tensor.shape} -> {output_tensor.shape}")
     return output_tensor
+
+
+def gather_pipeline_parallel(objects):
+    output = [None for _ in range(dist.get_activation_pipeline_parallel_world_size())]
+    torch.distributed.gather_objects(
+        objects,
+        output if dist.get_activation_pipeline_parallel_rank() == 0 else None,
+        dst=0,
+    )
+    if dist.get_activation_pipeline_parallel_rank() == 0:
+        logger.debug(f"Gather | IN: {len(objects)} -> {len(output)}")
+    return output

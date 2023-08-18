@@ -70,12 +70,6 @@ def initialize_distributed_backend(
         pipeline_parallel_size,
         data_parallel_size,
     )
-    logger.debug(
-        f"Initialized GPUDeviceMesh with group ranks: "
-        f"TP: {device_mesh.tp_group_ranks}, "
-        f"PP: {device_mesh.pp_group_ranks}, "
-        f"DP: {device_mesh.dp_group_ranks}"
-    )
 
     backend = backend_cls(device_mesh)
     _expose_distributed_backend(backend)
@@ -141,7 +135,26 @@ def activation_parallel_is_initialized() -> bool:
     return _ACTIVE_BACKEND.activation_parallel_is_initialized()
 
 
-def get_activation_tensor_parallel_group() -> pt_dist.ProcessGroup:
+def in_tensor_parallel_group() -> bool:
+    """Check if current worker belongs to a tensor parallel group."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.in_tensor_parallel_group()
+
+def in_pipeline_parallel_group() -> bool:
+    """Check if current worker belongs to a pipeline parallel group."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.in_pipeline_parallel_group()
+
+def in_data_parallel_group() -> bool:
+    """Check if current worker belongs to a data parallel group."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.in_data_parallel_group()
+
+
+def get_activation_tensor_parallel_group() -> Optional[pt_dist.ProcessGroup]:
     """Get the activation parallel tp group."""
     global _ACTIVE_BACKEND
     assert _ACTIVE_BACKEND is not None
@@ -153,6 +166,13 @@ def get_activation_data_parallel_group() -> Optional[pt_dist.ProcessGroup]:
     global _ACTIVE_BACKEND
     assert _ACTIVE_BACKEND is not None
     return _ACTIVE_BACKEND.get_activation_data_parallel_group()
+
+
+def get_activation_pipeline_parallel_group() -> Optional[pt_dist.ProcessGroup]:
+    """Get the activation parallel dp group."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.get_activation_pipeline_parallel_group()
 
 
 def get_activation_tensor_parallel_world_size() -> int:
@@ -169,6 +189,13 @@ def get_activation_data_parallel_world_size() -> int:
     return _ACTIVE_BACKEND.get_activation_data_parallel_world_size()
 
 
+def get_activation_pipeline_parallel_world_size() -> int:
+    """Get the activation parallel dp group world size."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.get_activation_pipeline_parallel_world_size()
+
+
 def get_activation_tensor_parallel_rank() -> int:
     """Get the activation parallel tp group world size."""
     global _ACTIVE_BACKEND
@@ -181,6 +208,13 @@ def get_activation_data_parallel_rank() -> int:
     global _ACTIVE_BACKEND
     assert _ACTIVE_BACKEND is not None
     return _ACTIVE_BACKEND.get_activation_data_parallel_rank()
+
+
+def get_activation_pipeline_parallel_rank() -> int:
+    """Get the data parallel dp group world size."""
+    global _ACTIVE_BACKEND
+    assert _ACTIVE_BACKEND is not None
+    return _ACTIVE_BACKEND.get_activation_pipeline_parallel_rank()
 
 
 def destroy_activation_parallel() -> None:

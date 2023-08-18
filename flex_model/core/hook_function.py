@@ -118,19 +118,11 @@ class HookFunction:
 
         return tensor, partial(_repack, treedef, other_leaves)
 
-    def _bind_tensor_to_cpu_output(self, activation: Tensor) -> None:
+    def _default_bind_tensor_to_cpu_output(self, activation: Tensor) -> None:
         """Bind the activation tensor to the output dict."""
         assert self._output_ptr is not None
         dumped_tensor = activation.detach().cpu()
         self._output_ptr[self.module_name] = dumped_tensor
-
-    def _pipelined_bind_tensor_to_cpu_output(self, activation: Tensor) -> None:
-        """Bind the activation tensor to the output dict and send it to rank0.
-
-        This is especially useful in the case pipeline parallel size > 1. If we
-        just dump the activation tensor to cpu
-        """
-        raise NotImplementedError
 
     def _parse_tensor(self, tensor: Tensor) -> None:
         """Populate collect, disperse, edit and dump functions at runtime.
@@ -143,7 +135,7 @@ class HookFunction:
         functions retain state during the life of a `FlexModel`. This should
         also be the only state that is maintained by a hook function.
         """
-        if dist.activation_parallel_is_initialized():
+        if torch.distributed.is_initialized():
             tp_world_size = dist.get_activation_tensor_parallel_world_size()
             dp_world_size = dist.get_activation_data_parallel_world_size()
         else:
@@ -158,7 +150,7 @@ class HookFunction:
         )
 
         self._edit = _parse_edit_from_function(self.editing_function)
-        self._dump = _parse_dump_from_function(self._bind_tensor_to_cpu_output)
+        self._dump = _parse_dump_from_function(self._default_bind_tensor_to_cpu_output)
 
     def _hook_function_template(
         self,
@@ -179,11 +171,10 @@ class HookFunction:
 
         tensor = self._collect(tensor)
 
-        # Rank0 is the only one to save and edit the activation
-        if not dist.activation_parallel_is_initialized() or (
+        # Need PP group members to send layer activations to head rank0
+        if not torch.distributed.is_initialized() or (
             dist.activation_parallel_is_initialized() and
-            dist.get_activation_tensor_parallel_rank() == 0 and
-            dist.get_activation_data_parallel_rank() == 0
+            dist.in_pipeline_parallel_group()
         ):
             # Dump then edit: See V-composition analysis algo
             self._dump(tensor)

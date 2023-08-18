@@ -69,18 +69,22 @@ class FlexModel(nn.Module):
         self.save_ctx: Namespace = Namespace()  # dumb Namespace for now
         self.trainable_modules = nn.ModuleDict()
 
-        self.tp_world_size = tensor_parallel_size
-        self.pp_world_size = pipeline_parallel_size
-        self.dp_world_size = data_parallel_size
+        self.tp_size = tensor_parallel_size
+        self.pp_size = pipeline_parallel_size
+        self.dp_size = data_parallel_size
 
+        # Distributed valid states:
+        #   1. Single-gpu no torch distributed
+        #   2. Single-gpu with torch distributed
+        #   3. Multi-gpu with torch distributed
         if torch.distributed.is_initialized():
             # Initialize the proper distributed backend (ie. torch, accelerate,
             # etc.)
             dist.initialize_distributed_backend(
                 torch.distributed.get_world_size(),
-                self.tp_world_size,
-                self.pp_world_size,
-                self.dp_world_size,
+                self.tp_size,
+                self.pp_size,
+                self.dp_size,
             )
 
             # Initialize the activation parallel distributed process groups
@@ -190,7 +194,26 @@ class FlexModel(nn.Module):
             outputs = self.module(*args, **kwargs)
         else:
             with self._hook():
-                logger.debug(f"Rank{dist.get_rank()}: Running forward")
                 outputs = self.module(*args, **kwargs)
+
+        # Gather from all pp ranks to pp rank0 (ie. head rank0)
+        # NOTE: If rank not in pp group, torch dist gets world size for default
+        #       group!
+        if (
+            torch.distributed.is_initialized() and
+            dist.in_pipeline_parallel_group() and
+            dist.get_activation_pipeline_parallel_world_size() > 1
+        ):
+            gathered_acts = dist.gather_pipeline_parallel(self.output_ptr)
+            if gathered_acts is not None:
+                self.output_ptr = {
+                    layer_name: act
+                    for act_dict in gathered_acts
+                    for layer_name, act in act_dict.items()
+                }
+
+            # Reset back to empty dict for next forward pass
+            else:
+                self.output_ptr = {}
 
         return outputs

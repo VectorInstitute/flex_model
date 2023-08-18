@@ -37,7 +37,7 @@ def test_GPUDeviceMesh():
         ],
         [
             [[0], [1], [2], [3]],
-            [[0], [0, 1], [0, 2], [0, 3]],
+            [[0, 1, 2, 3]],
             [[0], [1], [2], [3]],
         ],
         [
@@ -47,12 +47,12 @@ def test_GPUDeviceMesh():
         ],
         [
             [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]],
-            [[ 0], [0, 4], [0, 8], [0, 12]],
+            [[0, 4, 8, 12]],
             [[0], [4], [8], [12]],
         ],
         [
             [[i] for i in range(16)],
-            [[0], [0, 1], [0, 2], [0, 3]],
+            [[0, 1, 2, 3]],
             [[0, 4, 8, 12], [1, 5, 9, 13], [2, 6, 10, 14], [3, 7, 11, 15]],
         ],
         [
@@ -62,7 +62,7 @@ def test_GPUDeviceMesh():
         ],
         [
             [[0, 1], [2, 3], [4, 5], [6, 7]],
-            [[0], [0, 2]],
+            [[0, 2]],
             [[0, 4], [2, 6]],
         ],
     ]
@@ -98,6 +98,22 @@ def test_initialize_and_destroy_activation_parallel():
 
     Utils.destroy_model_parallel()
     Utils.destroy_distributed()
+
+
+def test_distributed_backend_api():
+    Utils.initialize_distributed()
+    Utils.initialize_model_parallel(2, 1, 2)
+    Utils.initialize_distributed_backend(2, 1, 2)
+
+    raise NotImplementedError
+
+
+def test_mappings():
+    Utils.initialize_distributed()
+    Utils.initialize_model_parallel(2, 1, 2)
+    Utils.initialize_distributed_backend(2, 1, 2)
+
+    raise NotImplementedError
 
 
 setup_logger("debug")
