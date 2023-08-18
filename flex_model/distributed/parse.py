@@ -19,11 +19,13 @@ def _get_different_dim(shape1: Tuple[int, ...], shape2: Tuple[int, ...]) -> int:
         if shape1[i] != shape2[i]:
             different_dims.append(i)
 
-    assert len(different_dims) == 1, (f"Multiple sharded axes found: {shape1},"
-                                      f" {shape2}")
-    sharded_dim = different_dims[0]
+    assert (
+        len(different_dims) == 1 or
+        len(different_dims) == 0
+    ), (f"Multiple sharded axes found: {shape1},"
+        f" {shape2}")
 
-    return sharded_dim
+    return different_dims[0] if len(different_dims) == 1 else -1
 
 
 def _autofill_expected_shape(
@@ -72,27 +74,44 @@ def parse_collect_and_distribute_from_tensor(
     if tp_world_size == dp_world_size == 1:
         return dist.unity, dist.unity
 
-    # Only tensor parallelism
+    # Activation possibly sharded over tp, no need to gather over dp
     if tp_world_size > 1 and dp_world_size == 1:
         sharded_dim = _get_different_dim(tensor.shape, expected_shape)
-        collect_fn = lambda t: dist.all_gather_tensor_parallel(t, dim=sharded_dim)
-        disperse_fn = lambda t: dist.scatter_tensor_parallel(t, dim=sharded_dim)
 
-    # Only data parallelism
+        # Not sharded over tp
+        if sharded_dim == -1:
+            collect_fn = dist.unity
+            disperse_fn = dist.unity
+
+        # Sharded over tp
+        else:
+            collect_fn = lambda t: dist.all_gather_tensor_parallel(t, dim=sharded_dim)
+            disperse_fn = lambda t: dist.scatter_tensor_parallel(t, dim=sharded_dim)
+
+    # Only data parallelism, always gather
     elif tp_world_size == 1 and dp_world_size > 1:
         collect_fn = lambda t: dist.all_gather_data_parallel(t, dim=0)
         disperse_fn = lambda t: dist.scatter_data_parallel(t, dim=0)
 
-    # Both tensor and data parallelism
+    # Activation possibly sharded over tp, always gather over dp
     elif tp_world_size > 1 and dp_world_size > 1:
-        collect_fn = lambda t: dist.all_gather_data_parallel(
-            dist.all_gather_tensor_parallel(t, dim=sharded_dim),
-            dim=0,
-        )
-        disperse_fn = lambda t: dist.scatter_tensor_parallel(
-            dist.scatter_data_parallel(t, dim=0),
-            dim=sharded_dim,
-        )
+        sharded_dim = _get_different_dim(tensor.shape, expected_shape)
+
+        # Not sharded over tp
+        if sharded_dim == -1:
+            collect_fn = lambda t: dist.all_gather_data_parallel(t, dim=0)
+            disperse_fn = lambda t: dist.scatter_data_parallel(t, dim=0)
+
+        # Sharded over tp
+        else:
+            collect_fn = lambda t: dist.all_gather_data_parallel(
+                dist.all_gather_tensor_parallel(t, dim=sharded_dim),
+                dim=0,
+            )
+            disperse_fn = lambda t: dist.scatter_tensor_parallel(
+                dist.scatter_data_parallel(t, dim=0),
+                dim=sharded_dim,
+            )
 
     else:
         raise Exception("Invalid world sizes: tp{tp_world_size}, dp{dp_world_size}")

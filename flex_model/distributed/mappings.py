@@ -24,7 +24,7 @@ def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
         return tensor
 
     # We only interact among tensor parallel group to bcast
-    torch.ditributed.broadcast(
+    torch.distributed.broadcast(
         tensor=tensor,
         src=tp_rank,
         group=tp_group,
@@ -36,6 +36,9 @@ def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
 
 
 def broadcast_data_parallel(tensor: Tensor) -> Tensor:
+    if not dist.in_data_parallel_group():
+        return tensor
+
     dp_world_size = dist.get_activation_data_parallel_world_size()
     dp_rank = dist.get_activation_data_parallel_rank()
     dp_group = dist.get_activation_data_parallel_group()
@@ -44,7 +47,7 @@ def broadcast_data_parallel(tensor: Tensor) -> Tensor:
         return tensor
 
     # We only interact among tensor parallel group to bcast
-    torch.ditributed.broadcast(
+    torch.distributed.broadcast(
         tensor=tensor,
         src=dp_rank,
         group=dp_group,
@@ -80,6 +83,9 @@ def all_gather_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
 
 
 def all_gather_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
+    if not dist.in_data_parallel_group():
+        return tensor
+
     dp_world_size = dist.get_activation_data_parallel_world_size()
     dp_rank = dist.get_activation_data_parallel_rank()
     dp_group = dist.get_activation_data_parallel_group()
@@ -136,6 +142,9 @@ def scatter_tensor_parallel(tensor: Tensor, dim: int = -1):
 
 
 def scatter_data_parallel(tensor: Tensor, dim: int = 0):
+    if not dist.in_data_parallel_group():
+        return tensor
+
     dp_world_size = dist.get_activation_data_parallel_world_size()
     dp_rank = dist.get_activation_data_parallel_rank()
 
@@ -150,12 +159,19 @@ def scatter_data_parallel(tensor: Tensor, dim: int = 0):
 
 
 def gather_pipeline_parallel(objects):
-    output = [None for _ in range(dist.get_activation_pipeline_parallel_world_size())]
+    if not dist.in_pipeline_parallel_group():
+        return objects
+
+    pp_world_size = dist.get_activation_pipeline_parallel_world_size()
+    pp_rank = dist.get_activation_pipeline_parallel_rank()
+
+    output = [None for _ in range(pp_world_size)]
     torch.distributed.gather_objects(
         objects,
-        output if dist.get_activation_pipeline_parallel_rank() == 0 else None,
+        output if pp_rank == 0 else None,
         dst=0,
     )
-    if dist.get_activation_pipeline_parallel_rank() == 0:
+
+    if pp_rank == 0:
         logger.debug(f"Gather | IN: {len(objects)} -> {len(output)}")
     return output

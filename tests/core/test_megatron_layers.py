@@ -15,7 +15,6 @@ def test_MegatronLayers():
     setup_logger("debug")
 
     Utils.initialize_model_parallel()
-    Utils.initialize_activation_parallel()
 
     torch.manual_seed(42069)
 
@@ -35,7 +34,6 @@ def test_MegatronLayers():
 
     parallel_out, regular_out = model(inputs)
     assert torch.allclose(parallel_out, regular_out, atol=1e-7)
-    Utils.destroy_activation_parallel()
     Utils.destroy_model_parallel()
 
 
@@ -43,8 +41,6 @@ def test_FlexModelMegatron():
     setup_logger("debug")
 
     Utils.initialize_model_parallel(2, 1, 2)
-    Utils.initialize_distributed_backend(2, 1, 2)
-    Utils.initialize_activation_parallel()
 
     torch.manual_seed(42069)
 
@@ -61,15 +57,13 @@ def test_FlexModelMegatron():
     logger.debug(inputs)
 
     model = MegatronLayers(vocab_size, sequence_length, hidden_dim)
-    # Need activation parallel group to create MegatronLayers
-    Utils.destroy_activation_parallel()
 
     output_dict = {}
     model = FlexModel(
         model,
         output_dict,
         tensor_parallel_size=2,
-        pipeline_parllel_size=1,
+        pipeline_parallel_size=1,
         data_parallel_size=2,
     )
     print(model)
@@ -103,9 +97,9 @@ def test_FlexModelMegatron():
                               atol=1e-7)
         logger.info("Tests successful.")
 
-    Utils.destroy_activation_parallel()
-    Utils.destroy_distributed_backend()
-    Utils.destroy_model_parallel()
+    #Utils.destroy_activation_parallel()
+    #Utils.destroy_distributed_backend()
+    #Utils.destroy_model_parallel()
 
 
 test_MegatronLayers()

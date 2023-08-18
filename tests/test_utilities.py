@@ -77,13 +77,13 @@ class Utils:
 
 
 def gather_weight(param: Tensor, dim: int):
-    mp_group = mpu.get_tensor_model_parallel_group()
+    mp_group = mpu.get_model_parallel_group()
 
     if dist.get_world_size() == 1:
         return param
 
-    tensor_list = [torch.empty_like(param) for _ in range(mpu.get_tensor_model_parallel_world_size())]
-    tensor_list[mpu.get_tensor_model_parallel_rank()] = param
+    tensor_list = [torch.empty_like(param) for _ in range(mpu.get_model_parallel_world_size())]
+    tensor_list[mpu.get_model_parallel_rank()] = param
 
     dist.all_gather(tensor_list, param, mp_group)
 

@@ -216,4 +216,6 @@ class FlexModel(nn.Module):
             else:
                 self.output_ptr = {}
 
+        if torch.distributed.is_initialized():
+            logger.debug(f"Rank{torch.distributed.get_rank()} Finished forward")
         return outputs

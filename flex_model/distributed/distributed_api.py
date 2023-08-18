@@ -10,6 +10,16 @@ Notes:
 - Additionally, we leave primitives like `torch.dsitributed.get_rank()` to
   torch instead of wrapping them.
 
+Viable states:
+    1. Single-gpu no torch dist
+    2. Single-gpu w/ torch dist
+    3. Multi-gpu w/ torch dist
+
+Guards:
+- In the presence of torch distributed, every rank is in a TP group. However,
+  not every rank is in a DP or PP group. Therefore we must guard collectives
+  depending on presence within DP or PP groups.
+
 Flow:
 -> FlexModel.__init__: Call to initialize_distributed_backend(...)
 -> initialize_distributed_backend(...): Call to parse_backend(...)
