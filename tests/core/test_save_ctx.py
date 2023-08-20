@@ -40,7 +40,11 @@ def test_save_ctx():
     model = accelerator.prepare(model)
 
     activations = {}
-    model = FlexModel(model, activations)
+    model = FlexModel(
+        model,
+        activations,
+        data_parallel_size=2,
+    )
 
     prompts = [
         "It's a nice day we're having",
