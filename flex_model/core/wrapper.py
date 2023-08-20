@@ -54,7 +54,9 @@ class FlexModel(nn.Module):
         self,
         module: nn.Module,
         output_ptr: Dict[str, Tensor],
-        _override_world_size: int = 0,
+        tensor_parallel_size: int = 1,
+        pipeline_parallel_size: int = 1,
+        data_parallel_size: int = 1,
     ):
         super().__init__()
         self.module = module
@@ -67,10 +69,26 @@ class FlexModel(nn.Module):
         self.save_ctx: Namespace = Namespace()  # dumb Namespace for now
         self.trainable_modules = nn.ModuleDict()
 
-        # TODO: Make this configurable, especially for TP+PP use cases
+        self.tp_size = tensor_parallel_size
+        self.pp_size = pipeline_parallel_size
+        self.dp_size = data_parallel_size
+
+        # Distributed valid states:
+        #   1. Single-gpu no torch distributed
+        #   2. Single-gpu with torch distributed
+        #   3. Multi-gpu with torch distributed
         if torch.distributed.is_initialized():
-            parallel_size = list(range(torch.distributed.get_world_size()))
-            dist.initialize_activation_parallel(parallel_size)
+            # Initialize the proper distributed backend (ie. torch, accelerate,
+            # etc.)
+            dist.initialize_distributed_backend(
+                torch.distributed.get_world_size(),
+                self.tp_size,
+                self.pp_size,
+                self.dp_size,
+            )
+
+            # Initialize the activation parallel distributed process groups
+            dist.initialize_activation_parallel()
 
     def clear_all_state_(self) -> None:
         """Clear all state aside from wrapped module and output pointer."""
@@ -79,6 +97,8 @@ class FlexModel(nn.Module):
         self._hooks_active = False
         self.save_ctx.clear()
         self.trainable_modules.clear()
+        dist.destroy_activation_parallel()
+        dist.destroy_distributed_backend()
 
     def register_hook_function(
         self,
@@ -162,6 +182,8 @@ class FlexModel(nn.Module):
         collect_fn, _ = dist.parse_collect_and_distribute_from_tensor(
             local_param,
             expected_shape,
+            self.tp_world_size,
+            self.dp_world_size,
         )
         full_param = collect_fn(local_param).cpu()
         return full_param
@@ -172,7 +194,28 @@ class FlexModel(nn.Module):
             outputs = self.module(*args, **kwargs)
         else:
             with self._hook():
-                logger.debug(f"Rank{dist.get_rank()}: Running forward")
                 outputs = self.module(*args, **kwargs)
 
+        # Gather from all pp ranks to pp rank0 (ie. head rank0)
+        # NOTE: If rank not in pp group, torch dist gets world size for default
+        #       group!
+        if (
+            torch.distributed.is_initialized() and
+            dist.in_pipeline_parallel_group() and
+            dist.get_activation_pipeline_parallel_world_size() > 1
+        ):
+            gathered_acts = dist.gather_pipeline_parallel(self.output_ptr)
+            if gathered_acts is not None:
+                self.output_ptr = {
+                    layer_name: act
+                    for act_dict in gathered_acts
+                    for layer_name, act in act_dict.items()
+                }
+
+            # Reset back to empty dict for next forward pass
+            else:
+                self.output_ptr = {}
+
+        if torch.distributed.is_initialized():
+            logger.debug(f"Rank{torch.distributed.get_rank()} Finished forward")
         return outputs

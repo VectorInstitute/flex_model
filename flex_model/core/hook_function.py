@@ -118,7 +118,7 @@ class HookFunction:
 
         return tensor, partial(_repack, treedef, other_leaves)
 
-    def _bind_tensor_to_cpu_output(self, activation: Tensor) -> None:
+    def _default_bind_tensor_to_cpu_output(self, activation: Tensor) -> None:
         """Bind the activation tensor to the output dict."""
         assert self._output_ptr is not None
         dumped_tensor = activation.detach().cpu()
@@ -135,13 +135,22 @@ class HookFunction:
         functions retain state during the life of a `FlexModel`. This should
         also be the only state that is maintained by a hook function.
         """
+        if torch.distributed.is_initialized():
+            tp_world_size = dist.get_activation_tensor_parallel_world_size()
+            dp_world_size = dist.get_activation_data_parallel_world_size()
+        else:
+            tp_world_size = 1
+            dp_world_size = 1
+
         self._collect, self._disperse = dist.parse_collect_and_distribute_from_tensor(
             tensor,
             self.expected_shape,
+            tp_world_size,
+            dp_world_size,
         )
 
         self._edit = _parse_edit_from_function(self.editing_function)
-        self._dump = _parse_dump_from_function(self._bind_tensor_to_cpu_output)
+        self._dump = _parse_dump_from_function(self._default_bind_tensor_to_cpu_output)
 
     def _hook_function_template(
         self,
@@ -162,8 +171,10 @@ class HookFunction:
 
         tensor = self._collect(tensor)
 
-        if not dist.is_initialized() or (
-            dist.is_initialized() and dist.get_rank() == 0
+        # Need PP group members to send layer activations to head rank0
+        if not torch.distributed.is_initialized() or (
+            dist.activation_parallel_is_initialized() and
+            dist.in_pipeline_parallel_group()
         ):
             # Dump then edit: See V-composition analysis algo
             self._dump(tensor)

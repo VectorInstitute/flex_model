@@ -2,18 +2,15 @@
 Run `pip install -e .` from the root directory.
 
 # Important Notes
-- Testing the correctness of the fairscale llama activations is still a WIP. The
-huggingface llama model implementation is slightly different, especially when
-it comes to the RoPE positional embedding implementations. Future tests will 
-compare between non-distributed and distributed versions of the models.
-
 - Make sure to replace any instances of `module.forward(inputs)` with
 `module(inputs)`. The forward hooks are not run if you directly call
 the forward function of a module (this is the case with LLaMA).
 
 # Usage
 Here's a short example on how you would use the FlexModel and HookFunction
-classes. 
+classes. When using distributed models using FSDP or Megatron layers, the
+`FlexModel` class requires specification of data parallel (DP), tensor parallel
+(TP), and pipeline parallel (PP) sizes.
 ```
 from flex_model import FlexModel, HookFunction
 
@@ -25,7 +22,13 @@ inputs = ...
 output_dict = {}
 
 # Wrap the model
-model = FlexModel(model, output_dict)
+model = FlexModel(
+	model,
+	output_dict,
+	tensor_parallel_size=1,
+	pipeline_parallel_size=1,
+	data_parallel_size=2,		# For FSDP over 2 DP workers
+)
 
 # Only need to provide a shape hint on the dimension which may be sharded
 # across gpus.
@@ -61,10 +64,10 @@ model.forward(inputs)
 
 # Running Tests
 Use `torchrun` to run all of the tests requiring distributed. Else you can just
-use `python3`. All distributed tests were done on 2 GPUs.
+use `python3`. All distributed tests were done on 2-4 GPUs.
 ```
 torchrun --nnodes 1 \
-	--nproc_per_node 2 \
+	--nproc_per_node <2 or 4> \
 	--rdzv_id 6969 \
 	--rdzv_backend c10d \
 	--rdzv_endpoint <gpuXXX> \
