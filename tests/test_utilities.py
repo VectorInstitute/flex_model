@@ -44,6 +44,7 @@ class Utils:
 
         mpu.initialize_model_parallel(
             model_parallel_size_=tp,
+            pipeline_length=pp,
         )
 
     @staticmethod

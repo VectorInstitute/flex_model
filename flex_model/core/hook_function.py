@@ -145,8 +145,6 @@ class HookFunction:
         self._collect, self._disperse = dist.parse_collect_and_distribute_from_tensor(
             tensor,
             self.expected_shape,
-            tp_world_size,
-            dp_world_size,
         )
 
         self._edit = _parse_edit_from_function(self.editing_function)

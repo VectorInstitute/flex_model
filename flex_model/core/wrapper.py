@@ -179,11 +179,9 @@ class FlexModel(nn.Module):
         don't need to use the dispersion function.
         """
         local_param = self.module.get_parameter(parameter_name).detach()
-        collect_fn, _ = dist.parse_collect_and_distribute_from_tensor(
+        collect_fn, _ = dist.parse_collect_from_parameter_tensor(
             local_param,
             expected_shape,
-            self.tp_world_size,
-            self.dp_world_size,
         )
         full_param = collect_fn(local_param).cpu()
         return full_param

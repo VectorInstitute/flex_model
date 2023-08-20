@@ -108,13 +108,6 @@ def test_distributed_backend_api():
     raise NotImplementedError
 
 
-def test_mappings():
-    Utils.initialize_distributed()
-    Utils.initialize_model_parallel(2, 1, 2)
-    Utils.initialize_distributed_backend(2, 1, 2)
-
-    raise NotImplementedError
-
 
 setup_logger("debug")
 test_initialize_and_destroy_activation_parallel()
