@@ -17,7 +17,6 @@ def unity(tensor: Tensor) -> Tensor:
 
 def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
-    tp_rank = dist.get_activation_tensor_parallel_rank()
     tp_group = dist.get_activation_tensor_parallel_group()
 
     if tp_world_size == 1:
@@ -26,7 +25,7 @@ def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
     # We only interact among tensor parallel group to bcast
     torch.distributed.broadcast(
         tensor=tensor,
-        src=tp_rank,
+        src=0,
         group=tp_group,
         async_op=False,
     )
@@ -40,7 +39,6 @@ def broadcast_data_parallel(tensor: Tensor) -> Tensor:
         return tensor
 
     dp_world_size = dist.get_activation_data_parallel_world_size()
-    dp_rank = dist.get_activation_data_parallel_rank()
     dp_group = dist.get_activation_data_parallel_group()
 
     if dp_world_size == 1:
@@ -49,7 +47,7 @@ def broadcast_data_parallel(tensor: Tensor) -> Tensor:
     # We only interact among tensor parallel group to bcast
     torch.distributed.broadcast(
         tensor=tensor,
-        src=dp_rank,
+        src=0,
         group=dp_group,
         async_op=False,
     )
@@ -166,7 +164,7 @@ def gather_pipeline_parallel(objects):
     pp_rank = dist.get_activation_pipeline_parallel_rank()
 
     output = [None for _ in range(pp_world_size)]
-    torch.distributed.gather_objects(
+    torch.distributed.gather_object(
         objects,
         output if pp_rank == 0 else None,
         dst=0,

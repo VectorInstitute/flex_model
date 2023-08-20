@@ -29,4 +29,7 @@ from .mappings import (
     scatter_data_parallel,
     gather_pipeline_parallel,
 )
-from .parse import parse_collect_and_distribute_from_tensor
+from .parse import (
+    parse_collect_from_parameter_tensor,
+    parse_collect_and_distribute_from_tensor,
+)
