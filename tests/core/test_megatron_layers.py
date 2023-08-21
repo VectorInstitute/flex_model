@@ -6,14 +6,14 @@ import torch.distributed as dist
 from flex_model.core import FlexModel, HookFunction
 from flex_model.utils import setup_logger
 from tests.test_utilities import Utils, MegatronLayers
+from tests.registry import register_test
 
 
 logger = logging.getLogger(__name__)
 
 
+@register_test
 def test_MegatronLayers():
-    setup_logger("debug")
-
     Utils.initialize_model_parallel()
 
     torch.manual_seed(42069)
@@ -37,9 +37,8 @@ def test_MegatronLayers():
     Utils.destroy_model_parallel()
 
 
+@register_test
 def test_FlexModelMegatron():
-    setup_logger("debug")
-
     Utils.initialize_model_parallel(2, 1, 2)
 
     torch.manual_seed(42069)
@@ -98,10 +97,10 @@ def test_FlexModelMegatron():
             output_dict["row_parallel_linear"], output_dict["row_linear"], atol=1e-7
         )
         logger.info("Tests successful.")
-
-    # Utils.destroy_activation_parallel()
-    # Utils.destroy_distributed_backend()
-    # Utils.destroy_model_parallel()
+        
+    Utils.destroy_activation_parallel()
+    Utils.destroy_distributed_backend()
+    Utils.destroy_model_parallel()
 
 
 test_MegatronLayers()

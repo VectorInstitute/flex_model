@@ -8,11 +8,13 @@ from accelerate import Accelerator
 from flex_model.core import FlexModel, HookFunction
 import flex_model.distributed as dist
 from flex_model.utils import setup_logger
+from tests.registry import register_test
 
 
 logger = logging.getLogger(__name__)
 
 
+@register_test
 def make_model_and_tokenizer():
     model = AutoModelForCausalLM.from_pretrained(
         "/ssd005/projects/llm/llama-2-13b-hf",
@@ -31,9 +33,8 @@ def make_model_and_tokenizer():
     return model, tokenizer
 
 
+@register_test
 def test_save_ctx():
-    setup_logger("debug")
-
     accelerator = Accelerator()
 
     model, tokenizer = make_model_and_tokenizer()
@@ -43,7 +44,7 @@ def test_save_ctx():
     model = FlexModel(
         model,
         activations,
-        data_parallel_size=2,
+        data_parallel_size=accelerator.num_processes,
     )
 
     prompts = [

@@ -21,6 +21,3 @@ def test_flatten_and_unflatten():
     new_treedef, new_leaves = flatten(result)
     assert new_treedef == treedef
     assert new_leaves == edited_leaves
-
-
-test_flatten_and_unflatten()

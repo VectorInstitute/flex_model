@@ -157,7 +157,6 @@ def test_gather_pipeline_parallel():
     Utils.destroy_model_parallel()
 
 
-setup_logger("debug")
 test_broadcast_tensor_parallel()
 test_broadcast_data_parallel()
 test_all_gather_tensor_parallel()

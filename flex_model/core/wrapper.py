@@ -80,8 +80,9 @@ class FlexModel(nn.Module):
         if torch.distributed.is_initialized():
             # Initialize the proper distributed backend (ie. torch, accelerate,
             # etc.)
+            world_size = self.tp_size * self.pp_size * self.dp_size
             dist.initialize_distributed_backend(
-                torch.distributed.get_world_size(),
+                world_size,
                 self.tp_size,
                 self.pp_size,
                 self.dp_size,

@@ -7,6 +7,8 @@ from accelerate import Accelerator
 from flex_model.core import FlexModel, HookFunction
 import flex_model.distributed as dist
 from flex_model.utils import setup_logger
+from tests.registry import register_test
+from tests.test_utilities import Utils
 
 
 logger = logging.getLogger(__name__)
@@ -112,13 +114,12 @@ def make_model_and_tokenizer():
     return model, tokenizer
 
 
+@register_test
 def test_huggingface_llama():
     """
     Make sure an accelerate-FSDP model gives the same output as a model
     running on one gpu. The single-gpu model will process one batch at a time.
     """
-    setup_logger("debug")
-
     accelerator = Accelerator()
 
     model, tokenizer = make_model_and_tokenizer()
@@ -147,12 +148,12 @@ def test_huggingface_llama():
     flex_model = FlexModel(
         model,
         multi_gpu_activations,
-        data_parallel_size=2,
+        data_parallel_size=accelerator.num_processes,
     )
     for module_name, expected_shape in LLAMA_MODULES_FSDP.items():
         flex_model.register_hook_function(HookFunction(module_name, expected_shape))
 
-    chunked_inputs = inputs.chunk(2, dim=0)
+    chunked_inputs = inputs.chunk(accelerator.num_processes, dim=0)
 
     _ = flex_model(chunked_inputs[accelerator.process_index])
 
@@ -179,20 +180,11 @@ def test_huggingface_llama():
     for module_name, expected_shape in LLAMA_MODULES.items():
         flex_model.register_hook_function(HookFunction(module_name, expected_shape))
 
-    # Process microbatch 0
-    _ = flex_model(chunked_inputs[0])
-    for k, v in single_gpu_activations.items():
-        all_single_gpu_activations[k] = v
-    single_gpu_activations.clear()
-
-    # Process microbatch 1
-    _, flex_model(chunked_inputs[1])
-    for k, v in single_gpu_activations.items():
-        all_single_gpu_activations[k] = torch.cat(
-            (single_gpu_activations[k], v),
-            dim=0,
-        )
-    single_gpu_activations.clear()
+    for chunk in chunked_inputs:
+        _ = flex_model(chunked_inputs[0])
+        for k, v in single_gpu_activations.items():
+            all_single_gpu_activations[k] = v
+        single_gpu_activations.clear()
 
     # Make sure activations are equal
     for k in single_gpu_activations.keys():

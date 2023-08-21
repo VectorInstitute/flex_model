@@ -22,6 +22,3 @@ def test_BaseModelOutputWithPastNode():
     assert torch.equal(new_obj.past_key_values, obj.past_key_values)
     assert torch.equal(new_obj.hidden_states, obj.hidden_states)
     assert torch.equal(new_obj.attentions, obj.attentions)
-
-
-test_BaseModelOutputWithPastNode()
