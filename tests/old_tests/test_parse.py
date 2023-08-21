@@ -32,7 +32,8 @@ def test_parse_collect_and_distribute_from_tensor():
     tensor = torch.ones((1)).cuda()
     expected_shape = (1,)
     collect, distribute = parse_collect_and_distribute_from_tensor(
-        tensor, expected_shape)
+        tensor, expected_shape
+    )
     assert collect == distribute == fm_dist.unity
 
     Utils.initialize_activation_parallel()
@@ -41,7 +42,8 @@ def test_parse_collect_and_distribute_from_tensor():
     tensor = torch.ones((1)).cuda() * fm_dist.get_rank()
     expected_shape = (fm_dist.get_world_size(),)
     collect, distribute = parse_collect_and_distribute_from_tensor(
-        tensor, expected_shape)
+        tensor, expected_shape
+    )
     assert collect.func == fm_dist.all_gather_sync
     assert distribute.func == fm_dist.scatter_rank0_sync
 
@@ -49,16 +51,17 @@ def test_parse_collect_and_distribute_from_tensor():
     tensor = torch.ones((1)).cuda() * fm_dist.get_rank()
     expected_shape = (fm_dist.get_world_size(),)
     collect, distribute = parse_collect_and_distribute_from_tensor(
-        tensor, expected_shape)
+        tensor, expected_shape
+    )
     assert collect.func == fm_dist.all_gather_sync
     assert distribute.func == fm_dist.scatter_rank0_sync
-
 
     # Replicated case
     tensor = torch.ones((1)).cuda()
     expected_shape = (1,)
     collect, distribute = parse_collect_and_distribute_from_tensor(
-        tensor, expected_shape)
+        tensor, expected_shape
+    )
     assert collect == fm_dist.unity
     assert distribute == fm_dist.broadcast_rank0_sync
 

@@ -171,8 +171,8 @@ class HookFunction:
 
         # Need PP group members to send layer activations to head rank0
         if not torch.distributed.is_initialized() or (
-            dist.activation_parallel_is_initialized() and
-            dist.in_pipeline_parallel_group()
+            dist.activation_parallel_is_initialized()
+            and dist.in_pipeline_parallel_group()
         ):
             # Dump then edit: See V-composition analysis algo
             self._dump(tensor)

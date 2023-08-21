@@ -4,3 +4,4 @@ tokenizers
 torch
 transformers
 fairscale
+black

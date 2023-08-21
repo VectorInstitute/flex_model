@@ -28,7 +28,7 @@ def test_initialize_lens_model_parallel():
     assert not tl_dist.is_initialized()
     assert tl_dist.get_lens_model_parallel_group() is None
 
- 
+
 def test_Translators():
     num_layers = 4
     batch_size = 2
@@ -36,7 +36,11 @@ def test_Translators():
     hidden_dim = 32
     translator = Translators(hidden_dim, num_layers).cuda()
     # LBSH
-    inputs = torch.randn((num_layers, batch_size, seq_len, hidden_dim)).cuda().to(torch.bfloat16)
+    inputs = (
+        torch.randn((num_layers, batch_size, seq_len, hidden_dim))
+        .cuda()
+        .to(torch.bfloat16)
+    )
     for layer in translator.translators:
         assert layer.shape == (hidden_dim, hidden_dim)
         assert torch.equal(layer, torch.eye(hidden_dim).to(layer.dtype).cuda())
@@ -56,7 +60,8 @@ def test_DistributedTunedLens():
     model, tokenize_fn = make_llama2_model(
         "/ssd005/projects/llm/llama-2-13b",
         "/ssd005/projects/llm/llama-2-13b/tokenizer.model",
-        128, 4
+        128,
+        4,
     )
 
     dtl = DistributedTunedLens(

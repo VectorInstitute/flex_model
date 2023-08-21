@@ -31,24 +31,67 @@ _LLAMA_VANILLA_TORCH_MODULES = {
 
 _FSDP_PREFIX = "_fsdp_wrapped_module."
 _LLAMA_FSDP_MODULES = {
-    "_fsdp_wrapped_module.model.layers.5._fsdp_wrapped_module.self_attn": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.20._fsdp_wrapped_module.self_attn": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.39._fsdp_wrapped_module.self_attn": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.6._fsdp_wrapped_module.self_attn.o_proj_dummy": (None, None, 5120),
-    #"_fsdp_wrapped_module.model.layers.2._fsdp_wrapped_module.mlp.act_fn",
-    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.self_attn.v_proj_dummy": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.self_attn.k_proj_dummy": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.8._fsdp_wrapped_module.self_attn.q_proj_dummy": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.post_attention_layernorm": (None, None, 5120),
+    "_fsdp_wrapped_module.model.layers.5._fsdp_wrapped_module.self_attn": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.20._fsdp_wrapped_module.self_attn": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.39._fsdp_wrapped_module.self_attn": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.6._fsdp_wrapped_module.self_attn.o_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
+    # "_fsdp_wrapped_module.model.layers.2._fsdp_wrapped_module.mlp.act_fn",
+    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.self_attn.v_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.self_attn.k_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.8._fsdp_wrapped_module.self_attn.q_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.post_attention_layernorm": (
+        None,
+        None,
+        5120,
+    ),
     "_fsdp_wrapped_module.model.layers.32._fsdp_wrapped_module.mlp": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.mlp.gate_proj_dummy": (None, None, 13824),
-    "_fsdp_wrapped_module.model.layers.28._fsdp_wrapped_module.mlp.up_proj_dummy": (None, None, 13824),
-    "_fsdp_wrapped_module.model.layers.9._fsdp_wrapped_module.mlp.down_proj_dummy": (None, None, 5120),
+    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.mlp.gate_proj_dummy": (
+        None,
+        None,
+        13824,
+    ),
+    "_fsdp_wrapped_module.model.layers.28._fsdp_wrapped_module.mlp.up_proj_dummy": (
+        None,
+        None,
+        13824,
+    ),
+    "_fsdp_wrapped_module.model.layers.9._fsdp_wrapped_module.mlp.down_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
     "_fsdp_wrapped_module.model.embed_tokens": (None, None, 5120),
-    #"_fsdp_wrapped_module.model": (None, None, 5120),
+    # "_fsdp_wrapped_module.model": (None, None, 5120),
     "_fsdp_wrapped_module.model.layers.7": (None, None, 5120),
     "_fsdp_wrapped_module.lm_head_dummy": (None, None, 32000),
-
 }
 
 _LLAMA_MEGATRON_MODULES = {
@@ -65,7 +108,7 @@ _LLAMA_MEGATRON_MODULES = {
     "layers.28.feed_forward.w3": (None, None, 13824),
     "layers.9.feed_forward.w2": (None, None, 5120),
     "tok_embeddings": (None, None, 5120),
-    #"output": (None, None, 13824),
+    # "output": (None, None, 13824),
     "layers.7": (None, None, 5120),
     "output": (None, None, 32000),
 }

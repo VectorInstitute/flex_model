@@ -41,13 +41,14 @@ def _llama_megatron_run() -> Dict[str, Tensor]:
 
 def test_distributed_flex_model_megatron():
     from flex_model.tests.test_distributed import _llama_vanilla_torch_run
+
     logger.info("Testing megatron distributed flex model")
     megatron_output, megatron_out = _llama_megatron_run()
 
     if dist.get_rank() == 0:
         vanilla_torch_output, vanilla_torch_out = _llama_vanilla_torch_run()
 
-        mapping=module_comparison_mapping(
+        mapping = module_comparison_mapping(
             _LLAMA_VANILLA_TORCH_MODULES,
             _LLAMA_MEGATRON_MODULES,
         )
@@ -81,7 +82,7 @@ def main():
     setup_logger("info")
     # TODO: Can't run both at once with *different* models
     test_distributed_flex_model_megatron()
-    #test_weight_retrieval()
+    # test_weight_retrieval()
 
 
 if __name__ == "__main__":

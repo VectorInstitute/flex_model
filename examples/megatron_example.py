@@ -10,15 +10,20 @@ from flex_model.core import FlexModel, HookFunction
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b")
-    parser.add_argument("--tokenizer_dir", type=str, default="/ssd005/projects/llm/llama-2-13b/tokenizer.model")
+    parser.add_argument(
+        "--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b"
+    )
+    parser.add_argument(
+        "--tokenizer_dir",
+        type=str,
+        default="/ssd005/projects/llm/llama-2-13b/tokenizer.model",
+    )
     args = parser.parse_args()
     return args
 
 
 def main(args):
-    """Forward pass through llama-2-13b which uses megatron for TP, PP, and DP.
-    """
+    """Forward pass through llama-2-13b which uses megatron for TP, PP, and DP."""
     prompts = [
         "It's a nice day we're having",
         "The capital of Canada is",
@@ -37,7 +42,9 @@ def main(args):
 
     # Define tokenizer function
     def tokenize_fn(prompts):
-        input_tokens = [generator.tokenizer.encode(x, bos=True, eos=False) for x in prompts]
+        input_tokens = [
+            generator.tokenizer.encode(x, bos=True, eos=False) for x in prompts
+        ]
         bsz = len(input_tokens)
         total_len = max(len(t) for t in input_tokens)
         pad_id = 0

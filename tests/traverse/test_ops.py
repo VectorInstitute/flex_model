@@ -5,7 +5,8 @@ from flex_model.traverse.ops import flatten, unflatten
 
 def test_flatten_and_unflatten():
     layer_output = [
-        1, 2,
+        1,
+        2,
         torch.ones((1)).cuda(),
         "zzz",
         (torch.ones((1)).cuda() * 2, torch.ones((1)).cuda() * 3),

@@ -17,6 +17,7 @@ class GPUDeviceMesh:
 
     Even with huggingface accelerate backend, torch distributed is still used.
     """
+
     tp_group_ranks: List[List[int]]
     pp_group_ranks: List[List[int]]
     dp_group_ranks: List[List[int]]
@@ -174,7 +175,9 @@ class TorchDistributedBackend(DistributedBackend):
             group = pt_dist.new_group(group_ranks)
             if rank in group_ranks:
                 self.tp_group = group
-                logger.debug(f"Torch rank {pt_dist.get_rank()} init TP group: {group_ranks}")
+                logger.debug(
+                    f"Torch rank {pt_dist.get_rank()} init TP group: {group_ranks}"
+                )
             self.all_tp_groups.append(group_ranks)
 
         # Construct dp groups
@@ -183,7 +186,9 @@ class TorchDistributedBackend(DistributedBackend):
             group = pt_dist.new_group(group_ranks)
             if rank in group_ranks:
                 self.dp_group = group
-                logger.debug(f"Torch rank {pt_dist.get_rank()} init DP group: {group_ranks}")
+                logger.debug(
+                    f"Torch rank {pt_dist.get_rank()} init DP group: {group_ranks}"
+                )
             self.all_dp_groups.append(group_ranks)
 
         # Construct pp groups
@@ -192,7 +197,9 @@ class TorchDistributedBackend(DistributedBackend):
             group = pt_dist.new_group(group_ranks)
             if rank in group_ranks:
                 self.pp_group = group
-                logger.debug(f"Torch rank {pt_dist.get_rank()} init PP group: {group_ranks}")
+                logger.debug(
+                    f"Torch rank {pt_dist.get_rank()} init PP group: {group_ranks}"
+                )
             self.all_pp_groups.append(group_ranks)
 
     def activation_parallel_is_initialized(self) -> bool:
@@ -276,7 +283,9 @@ class AccelerateDistributedBackend(DistributedBackend):
             group = pt_dist.new_group(group_ranks)
             if rank in group_ranks:
                 self.tp_group = group
-                logger.debug(f"Torch rank {pt_dist.get_rank()} init TP group: {group_ranks}")
+                logger.debug(
+                    f"Torch rank {pt_dist.get_rank()} init TP group: {group_ranks}"
+                )
             self.all_tp_groups.append(group_ranks)
 
         # Construct dp groups
@@ -285,7 +294,9 @@ class AccelerateDistributedBackend(DistributedBackend):
             group = pt_dist.new_group(group_ranks)
             if rank in group_ranks:
                 self.dp_group = group
-                logger.debug(f"Torch rank {pt_dist.get_rank()} init DP group: {group_ranks}")
+                logger.debug(
+                    f"Torch rank {pt_dist.get_rank()} init DP group: {group_ranks}"
+                )
             self.all_dp_groups.append(group_ranks)
 
         # Construct pp groups
@@ -294,7 +305,9 @@ class AccelerateDistributedBackend(DistributedBackend):
             group = pt_dist.new_group(group_ranks)
             if rank in group_ranks:
                 self.pp_group = group
-                logger.debug(f"Torch rank {pt_dist.get_rank()} init PP group: {group_ranks}")
+                logger.debug(
+                    f"Torch rank {pt_dist.get_rank()} init PP group: {group_ranks}"
+                )
             self.all_pp_groups.append(group_ranks)
 
     def activation_parallel_is_initialized(self) -> bool:

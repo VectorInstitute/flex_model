@@ -51,8 +51,7 @@ def _llama_vanilla_torch_run() -> Dict[str, Tensor]:
 
 
 def _llama_fsdp_run() -> Dict[str, Tensor]:
-    """Forward pass through dual gpu fsdp llama model and apply forward hooks.
-    """
+    """Forward pass through dual gpu fsdp llama model and apply forward hooks."""
     model, tokenize_fn = get_llama_13b_hf()
     model = model.cpu()
 
@@ -75,11 +74,11 @@ def test_distributed_flex_model_fsdp():
 
     if accelerator.is_local_main_process:
         vanilla_torch_output, _ = _llama_vanilla_torch_run()
-        
+
         # Prune non-rank0 workers
         if len(fsdp_output) == 0:
             return
-        
+
         print("*" * 50)
         print_return_dict(vanilla_torch_output)
         print("*" * 50)
@@ -101,7 +100,7 @@ def test_distributed_flex_model_fsdp():
 def main():
     setup_logger("info")
     # Distributed config
-    #os.environ["NCCL_DEBUG"] = "INFO"
+    # os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["NCCL_IB_DISABLE"] = "1"
 
     logger.info("Testing Huggingface llama-13b dual gpu...")

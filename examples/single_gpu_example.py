@@ -10,8 +10,12 @@ from flex_model.core import FlexModel, HookFunction
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf")
-    parser.add_argument("--tokenizer_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf")
+    parser.add_argument(
+        "--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+    )
+    parser.add_argument(
+        "--tokenizer_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+    )
     args = parser.parse_args()
     return args
 
@@ -46,7 +50,7 @@ def main(args):
     hook_function = HookFunction(
         module_name="model.layers.30",
         expected_shape=(None, None, None),  # Not sharded, can pass None per dim
-        editing_function=None,              # Just doing retrieval
+        editing_function=None,  # Just doing retrieval
     )
 
     # Register hook function with the model
@@ -54,7 +58,9 @@ def main(args):
     ## NEW ##
 
     # Tokenize a prompt
-    inputs = tokenizer("Where is the best spot for lunch?", return_tensors="pt")["input_ids"]
+    inputs = tokenizer("Where is the best spot for lunch?", return_tensors="pt")[
+        "input_ids"
+    ]
 
     # Run through model to generate logits and activations
     logits = model(inputs)

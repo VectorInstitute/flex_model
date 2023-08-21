@@ -19,11 +19,9 @@ def _get_different_dim(shape1: Tuple[int, ...], shape2: Tuple[int, ...]) -> int:
         if shape1[i] != shape2[i]:
             different_dims.append(i)
 
-    assert (
-        len(different_dims) == 1 or
-        len(different_dims) == 0
-    ), (f"Multiple sharded axes found: {shape1},"
-        f" {shape2}")
+    assert len(different_dims) == 1 or len(different_dims) == 0, (
+        f"Multiple sharded axes found: {shape1}," f" {shape2}"
+    )
 
     return different_dims[0] if len(different_dims) == 1 else -1
 
@@ -66,10 +64,12 @@ def parse_collect_from_parameter_tensor(
     tensor_numel = tensor.numel()
     expected_numel = reduce(lambda x, y: x * y, expected_shape)
     assert tensor_numel in [
-        expected_numel // tp_world_size,    # Evenly sharded across TP
-        expected_numel,                     # Full-rank
-    ], (f"Imperfect activation sharding: Given {tensor_numel} expected "
-        f"{expected_numel}")
+        expected_numel // tp_world_size,  # Evenly sharded across TP
+        expected_numel,  # Full-rank
+    ], (
+        f"Imperfect activation sharding: Given {tensor_numel} expected "
+        f"{expected_numel}"
+    )
 
     # Single gpu fallback
     if tp_world_size == 1:
@@ -102,10 +102,12 @@ def parse_collect_and_distribute_from_tensor(
     tensor_numel = tensor.numel()
     expected_numel = reduce(lambda x, y: x * y, expected_shape)
     assert tensor_numel in [
-        expected_numel // tp_world_size,    # Evenly sharded across TP
-        expected_numel,                     # Full-rank
-    ], (f"Imperfect activation sharding: Given {tensor_numel} expected "
-        f"{expected_numel}")
+        expected_numel // tp_world_size,  # Evenly sharded across TP
+        expected_numel,  # Full-rank
+    ], (
+        f"Imperfect activation sharding: Given {tensor_numel} expected "
+        f"{expected_numel}"
+    )
 
     # Single gpu fallback
     if tp_world_size == dp_world_size == 1:

@@ -19,10 +19,14 @@ from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf")
+    parser.add_argument(
+        "--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--model_max_length", type=int, default=512)
-    parser.add_argument("--tokenizer_path", type=str, default="/ssd005/projects/llm/llama-2-13b-hf")
+    parser.add_argument(
+        "--tokenizer_path", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+    )
     parser.add_argument("--beta_1", type=float, default=0.9)
     parser.add_argument("--beta_2", type=float, default=0.95)
     parser.add_argument("--lr", type=float, default=5e-6)
@@ -40,9 +44,7 @@ def parse_args():
 
 def get_wikitext103_dataloaders(batch_size, tokenize_fn):
     def collate_fn(examples):
-        examples = [
-            ex["text"] for ex in examples
-        ]
+        examples = [ex["text"] for ex in examples]
         return tokenize_fn(examples)
 
     dataset = load_dataset("wikitext", "wikitext-103-v1")
@@ -83,7 +85,9 @@ def main(args):
     # NOTE: This only works for local devices, multiple nodes needs to get this
     #       from slurm environment variables.
     num_processes = torch.cuda.device_count()
-    gradient_accumulation_size = args.global_batch_size // args.local_batch_size * num_processes
+    gradient_accumulation_size = (
+        args.global_batch_size // args.local_batch_size * num_processes
+    )
     accelerator = Accelerator(gradient_accumulation_size)
 
     # Load model and tokenizer
@@ -100,7 +104,7 @@ def main(args):
     )
 
     # Need to manually add pad token and increase model vocab embeddings size
-    tokenizer.add_special_tokens({"pad_token":"<pad>"})
+    tokenizer.add_special_tokens({"pad_token": "<pad>"})
     tokenizer.model_max_length = args.model_max_length
     tokenizer.add_eos_token = True
     tokenizer.padding_side = "right"
@@ -149,7 +153,13 @@ def main(args):
     )
 
     # Shard dataloaders and optimizer for distributed
-    train_dataloader, val_dataloader, test_dataloader, optimizer, lr_scheduler = accelerator.prepare(
+    (
+        train_dataloader,
+        val_dataloader,
+        test_dataloader,
+        optimizer,
+        lr_scheduler,
+    ) = accelerator.prepare(
         train_dataloader,
         val_dataloader,
         test_dataloader,
@@ -179,7 +189,7 @@ def main(args):
                 # Eval loop
                 if i % args.train_steps_per_eval == 0 and i != 0:
                     model.eval()
-                    val_loss = torch.tensor(0.).to(accelerator.device)
+                    val_loss = torch.tensor(0.0).to(accelerator.device)
                     for batch in val_dataloader:
                         with torch.no_grad():
                             batch = add_labels(batch)
@@ -188,8 +198,10 @@ def main(args):
                             val_loss += outputs.loss
                     val_loss = accelerator.gather(val_loss).mean().item()
                     if accelerator.is_main_process:
-                        accelerator.print(f"Val loss at iter {i}: "
-                                          f"{val_loss / len(val_dataloader)}")
+                        accelerator.print(
+                            f"Val loss at iter {i}: "
+                            f"{val_loss / len(val_dataloader)}"
+                        )
                     model.train()
 
                 batch = add_labels(batch)

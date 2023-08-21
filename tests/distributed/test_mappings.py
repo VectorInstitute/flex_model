@@ -13,7 +13,6 @@ from flex_model.distributed.backends import GPUDeviceMesh
 logger = logging.getLogger(__name__)
 
 
-
 def test_broadcast_tensor_parallel():
     Utils.initialize_model_parallel(2, 1, 1)
     Utils.initialize_distributed_backend(2, 1, 1)
@@ -46,35 +45,43 @@ def test_broadcast_data_parallel():
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
     Utils.destroy_model_parallel()
-    
+
 
 def test_all_gather_tensor_parallel():
     Utils.initialize_model_parallel(2, 1, 1)
     Utils.initialize_distributed_backend(2, 1, 1)
     Utils.initialize_activation_parallel()
 
-    tensor_to_gather = torch.ones((1)).cuda() * fm_dist.get_activation_tensor_parallel_rank()
+    tensor_to_gather = (
+        torch.ones((1)).cuda() * fm_dist.get_activation_tensor_parallel_rank()
+    )
     result = fm_dist.all_gather_tensor_parallel(tensor_to_gather)
-    assert torch.equal(result, torch.arange(fm_dist.get_activation_tensor_parallel_world_size()).cuda())
+    assert torch.equal(
+        result, torch.arange(fm_dist.get_activation_tensor_parallel_world_size()).cuda()
+    )
 
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
     Utils.destroy_model_parallel()
- 
+
 
 def test_all_gather_data_parallel():
     Utils.initialize_model_parallel(1, 1, 2)
     Utils.initialize_distributed_backend(1, 1, 2)
     Utils.initialize_activation_parallel()
 
-    tensor_to_gather = torch.ones((1)).cuda() * fm_dist.get_activation_data_parallel_rank()
+    tensor_to_gather = (
+        torch.ones((1)).cuda() * fm_dist.get_activation_data_parallel_rank()
+    )
     result = fm_dist.all_gather_data_parallel(tensor_to_gather)
-    assert torch.equal(result, torch.arange(fm_dist.get_activation_data_parallel_world_size()).cuda())
+    assert torch.equal(
+        result, torch.arange(fm_dist.get_activation_data_parallel_world_size()).cuda()
+    )
 
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
     Utils.destroy_model_parallel()
- 
+
 
 def test_all_reduce_tensor_parallel():
     Utils.initialize_model_parallel(2, 1, 1)
@@ -83,7 +90,10 @@ def test_all_reduce_tensor_parallel():
 
     tensor_to_reduce = torch.ones((1)).cuda()
     result = fm_dist.all_reduce_tensor_parallel(tensor_to_reduce)
-    assert torch.equal(result, torch.ones((1)).cuda() * fm_dist.get_activation_tensor_parallel_world_size())
+    assert torch.equal(
+        result,
+        torch.ones((1)).cuda() * fm_dist.get_activation_tensor_parallel_world_size(),
+    )
 
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
@@ -95,9 +105,13 @@ def test_scatter_tensor_parallel():
     Utils.initialize_distributed_backend(2, 1, 1)
     Utils.initialize_activation_parallel()
 
-    tensor_to_scatter = torch.arange(fm_dist.get_activation_tensor_parallel_world_size()).cuda()
+    tensor_to_scatter = torch.arange(
+        fm_dist.get_activation_tensor_parallel_world_size()
+    ).cuda()
     result = fm_dist.scatter_tensor_parallel(tensor_to_scatter)
-    assert torch.equal(result, torch.ones((1)).cuda() * fm_dist.get_activation_tensor_parallel_rank())
+    assert torch.equal(
+        result, torch.ones((1)).cuda() * fm_dist.get_activation_tensor_parallel_rank()
+    )
 
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
@@ -109,9 +123,13 @@ def test_scatter_data_parallel():
     Utils.initialize_distributed_backend(1, 1, 2)
     Utils.initialize_activation_parallel()
 
-    tensor_to_scatter = torch.arange(fm_dist.get_activation_data_parallel_world_size()).cuda()
+    tensor_to_scatter = torch.arange(
+        fm_dist.get_activation_data_parallel_world_size()
+    ).cuda()
     result = fm_dist.scatter_data_parallel(tensor_to_scatter)
-    assert torch.equal(result, torch.ones((1)).cuda() * fm_dist.get_activation_data_parallel_rank())
+    assert torch.equal(
+        result, torch.ones((1)).cuda() * fm_dist.get_activation_data_parallel_rank()
+    )
 
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
@@ -138,7 +156,7 @@ def test_gather_pipeline_parallel():
     Utils.destroy_distributed_backend()
     Utils.destroy_model_parallel()
 
- 
+
 setup_logger("debug")
 test_broadcast_tensor_parallel()
 test_broadcast_data_parallel()

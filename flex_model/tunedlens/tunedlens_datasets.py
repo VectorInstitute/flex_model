@@ -17,11 +17,9 @@ def main():
     def tokenize(ps):
         return tokenizer(ps, padding=True, return_tensors="pt")
 
-
     dataset = load_dataset("wikitext", "wikitext-103-v1")
 
     original_tokenizer = Tokenizer("/ssd005/projects/llm/llama-2-13b/tokenizer.model")
-
 
     breakpoint()
 

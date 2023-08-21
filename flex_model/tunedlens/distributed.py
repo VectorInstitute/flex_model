@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 LENS_MODEL_PARALLEL_GROUP = None
 
 
-def initialize_lens_model_parallel(
-    lens_model_parallel_size: int = 1
-) -> None:
+def initialize_lens_model_parallel(lens_model_parallel_size: int = 1) -> None:
     """Initialize lens model parallel group."""
     global LENS_MODEL_PARALLEL_GROUP
     assert LENS_MODEL_PARALLEL_GROUP is None

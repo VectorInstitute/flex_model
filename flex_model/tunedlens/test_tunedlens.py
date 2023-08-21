@@ -24,8 +24,14 @@ logger = logging.getLogger(__name__)
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--log_level", type=str, default="warning")
-    parser.add_argument("--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b")
-    parser.add_argument("--tokenizer_path", type=str, default="/ssd005/projects/llm/llama-2-13b/tokenizer.model")
+    parser.add_argument(
+        "--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b"
+    )
+    parser.add_argument(
+        "--tokenizer_path",
+        type=str,
+        default="/ssd005/projects/llm/llama-2-13b/tokenizer.model",
+    )
     parser.add_argument("--hidden_dim", type=int, default=5120)
     parser.add_argument("--vocab_size", type=int, default=32000)
     parser.add_argument("--max_seq_len", type=int, default=512)
@@ -40,7 +46,11 @@ def parse_args():
     parser.add_argument("--weight_decay", type=float, default=1e-3)
     parser.add_argument("--log_interval", type=int, default=5)
     parser.add_argument("--tl_checkpoint_interval", type=int, default=1000)
-    parser.add_argument("--tl_checkpoint_dir", type=str, default="/ssd003/home/mchoi/projects/flex_model/flex_model/tunedlens/checkpoints")
+    parser.add_argument(
+        "--tl_checkpoint_dir",
+        type=str,
+        default="/ssd003/home/mchoi/projects/flex_model/flex_model/tunedlens/checkpoints",
+    )
     args = parser.parse_args()
     return args
 
@@ -68,7 +78,7 @@ def make_llama2_model(checkpoint_dir, tokenizer_path, max_seq_len, max_batch_siz
         )
         for k, t in enumerate(input_tokens):
             seq_len = min(len(t), max_seq_len)
-            tokens[k, : seq_len] = torch.tensor(
+            tokens[k, :seq_len] = torch.tensor(
                 t[:seq_len], dtype=torch.long, device="cuda"
             )
         return tokens
@@ -78,9 +88,7 @@ def make_llama2_model(checkpoint_dir, tokenizer_path, max_seq_len, max_batch_siz
 
 def get_wikitext103_dataloaders(batch_size, tokenize_fn):
     def collate_fn(examples):
-        examples = [
-            ex["text"] for ex in examples
-        ]
+        examples = [ex["text"] for ex in examples]
         return tokenize_fn(examples)
 
     dataset = load_dataset("wikitext", "wikitext-103-v1")

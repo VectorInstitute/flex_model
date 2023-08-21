@@ -52,7 +52,7 @@ def test_save_ctx():
         "What should I eat for dinner tonight?",
         "There's about three people going to",
     ]
-    
+
     inputs = tokenizer(
         prompts,
         padding="max_length",

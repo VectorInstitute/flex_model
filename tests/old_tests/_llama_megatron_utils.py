@@ -39,10 +39,10 @@ def load_llama(
     max_batch_size: int,
 ) -> Transformer:
     checkpoints = sorted(Path(ckpt_dir).glob("*.pth"))
-    assert world_size == len(
-        checkpoints
-    ), (f"Loading a checkpoint for MP={len(checkpoints)} but world size is "
-        f"{world_size}")
+    assert world_size == len(checkpoints), (
+        f"Loading a checkpoint for MP={len(checkpoints)} but world size is "
+        f"{world_size}"
+    )
     ckpt_path = checkpoints[local_rank]
     checkpoint = torch.load(ckpt_path, map_location="cpu")
     with open(Path(ckpt_dir) / "params.json", "r") as f:

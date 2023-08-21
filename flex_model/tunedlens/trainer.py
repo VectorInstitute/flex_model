@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DistributedTunedLensTrainerConfig:
     """Metadata object for distributed lens training."""
+
     optimizer_type: torch.optim.Optimizer = torch.optim.SGD
     use_scheduler: bool = True
     batch_size: int = 8
@@ -46,6 +47,7 @@ class DistributedTunedLensTrainerConfig:
 @dataclass
 class DistributedTunedLensTrainerState:
     """Class containing all state for DistributedTunedLensTrainer."""
+
     train_loss: float
     val_loss: float
     step: int
@@ -61,6 +63,7 @@ class DistributedTunedLensTrainerState:
 
 class DistributedTunedLensTrainer:
     """Distributed TunedLens trainer."""
+
     def __init__(self, state: DistributedTunedLensTrainerState) -> None:
         self.state = state
 
@@ -159,9 +162,11 @@ class DistributedTunedLensTrainer:
             interval_loss += loss
 
             if step != 0 and step % self.state.config.log_interval == 0:
-                print(f"Rank{tl_dist.get_lens_model_parallel_rank()} loss at {step}: {interval_loss / self.state.config.log_interval}")
+                print(
+                    f"Rank{tl_dist.get_lens_model_parallel_rank()} loss at {step}: {interval_loss / self.state.config.log_interval}"
+                )
                 interval_loss = 0
-            
+
     def train_step(self, batch):
         self.state.optimizer.zero_grad()
 
@@ -204,7 +209,9 @@ class DistributedTunedLensTrainer:
             val_loss += loss.item()
 
         val_loss = val_loss / self.state.config.val_steps
-        print(f"Rank{tl_dist.get_lens_model_parallel_rank()} val loss at {step}: {val_loss}")
+        print(
+            f"Rank{tl_dist.get_lens_model_parallel_rank()} val loss at {step}: {val_loss}"
+        )
         return val_loss
 
     def validate_step(self, batch):

@@ -83,23 +83,25 @@ def test_FlexModelMegatron():
     _, _ = model(inputs)
 
     if dist.get_rank() == 0:
-        assert torch.allclose(output_dict["vocab_parallel_embedding"],
-                              output_dict["vocab_embedding"],
-                              atol=1e-7)
-        assert torch.allclose(output_dict["parallel_embedding"],
-                              output_dict["embedding"],
-                              atol=1e-7)
-        assert torch.allclose(output_dict["column_parallel_linear"],
-                              output_dict["col_linear"],
-                              atol=1e-7)
-        assert torch.allclose(output_dict["row_parallel_linear"],
-                              output_dict["row_linear"],
-                              atol=1e-7)
+        assert torch.allclose(
+            output_dict["vocab_parallel_embedding"],
+            output_dict["vocab_embedding"],
+            atol=1e-7,
+        )
+        assert torch.allclose(
+            output_dict["parallel_embedding"], output_dict["embedding"], atol=1e-7
+        )
+        assert torch.allclose(
+            output_dict["column_parallel_linear"], output_dict["col_linear"], atol=1e-7
+        )
+        assert torch.allclose(
+            output_dict["row_parallel_linear"], output_dict["row_linear"], atol=1e-7
+        )
         logger.info("Tests successful.")
 
-    #Utils.destroy_activation_parallel()
-    #Utils.destroy_distributed_backend()
-    #Utils.destroy_model_parallel()
+    # Utils.destroy_activation_parallel()
+    # Utils.destroy_distributed_backend()
+    # Utils.destroy_model_parallel()
 
 
 test_MegatronLayers()

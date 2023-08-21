@@ -26,8 +26,10 @@ class Utils:
     @staticmethod
     def initialize_distributed():
         dist.init_process_group(backend="nccl")
-        print(f"Rank{dist.get_rank()}/{dist.get_world_size()}: "
-              f"Distributed initialized")
+        print(
+            f"Rank{dist.get_rank()}/{dist.get_world_size()}: "
+            f"Distributed initialized"
+        )
 
     @staticmethod
     def destroy_distributed():
@@ -83,7 +85,9 @@ def gather_weight(param: Tensor, dim: int):
     if dist.get_world_size() == 1:
         return param
 
-    tensor_list = [torch.empty_like(param) for _ in range(mpu.get_model_parallel_world_size())]
+    tensor_list = [
+        torch.empty_like(param) for _ in range(mpu.get_model_parallel_world_size())
+    ]
     tensor_list[mpu.get_model_parallel_rank()] = param
 
     dist.all_gather(tensor_list, param, mp_group)
@@ -110,7 +114,8 @@ class MegatronLayers(nn.Module):
             self.vocab_size, self.hidden_dim
         ).cuda()
         full_vocab_embedding_weight = gather_weight(
-            self.vocab_parallel_embedding.weight.detach(), dim=0,
+            self.vocab_parallel_embedding.weight.detach(),
+            dim=0,
         )
         self.vocab_embedding = nn.Embedding(self.vocab_size, self.hidden_dim)
         self.vocab_embedding.weight = nn.Parameter(full_vocab_embedding_weight)
@@ -151,14 +156,13 @@ class MegatronLayers(nn.Module):
         self.row_linear = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
         self.row_linear.weight = nn.Parameter(full_row_linear_weight)
 
-
     def parallel_forward(self, inputs):
         embed_0 = self.vocab_parallel_embedding(inputs)
         embed_1 = self.parallel_embedding(inputs)
         embed = embed_0 + embed_1
 
         col = self.column_parallel_linear(embed)
-        
+
         row = self.row_parallel_linear(col)
 
         return row
@@ -169,7 +173,7 @@ class MegatronLayers(nn.Module):
         embed = embed_0 + embed_1
 
         col = self.col_linear(embed)
-        
+
         row = self.row_linear(col)
 
         return row

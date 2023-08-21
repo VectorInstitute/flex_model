@@ -198,9 +198,9 @@ class FlexModel(nn.Module):
         # NOTE: If rank not in pp group, torch dist gets world size for default
         #       group!
         if (
-            torch.distributed.is_initialized() and
-            dist.in_pipeline_parallel_group() and
-            dist.get_activation_pipeline_parallel_world_size() > 1
+            torch.distributed.is_initialized()
+            and dist.in_pipeline_parallel_group()
+            and dist.get_activation_pipeline_parallel_world_size() > 1
         ):
             gathered_acts = dist.gather_pipeline_parallel(self.output_ptr)
             if gathered_acts is not None:

@@ -51,6 +51,7 @@ def kl_divergence(logits: Tensor, preds: Tensor, mask: Tensor) -> Tensor:
     )
     return torch.mean(kl_div)
 
+
 def perplexity(logits: Tensor, preds: Tensor, mask: Tensor) -> Tensor:
     """Compute the perplexity score."""
     # TODO
@@ -59,6 +60,7 @@ def perplexity(logits: Tensor, preds: Tensor, mask: Tensor) -> Tensor:
 
 class Norm(nn.Module):
     """Default LayerNorm (RMSNorm) implementation from llama-2."""
+
     def __init__(self, norm_weight: Tensor) -> None:
         super().__init__()
         self.norm_weight = norm_weight
@@ -70,6 +72,7 @@ class Norm(nn.Module):
 
 class Unembed(nn.Module):
     """Basic unembedding layer."""
+
     def __init__(self, unembed_weight: Tensor) -> None:
         super().__init__()
         self.unembed_weight = unembed_weight
@@ -88,6 +91,7 @@ class Translators(nn.Module):
     parameter tensors (linear and bias) but with an extra leading dimension for
     the number of translators (ie. number of layers).
     """
+
     def __init__(self, hidden_dim: int, num_layers: int) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -100,16 +104,12 @@ class Translators(nn.Module):
         self.translators = nn.parameter.Parameter(linear, requires_grad=True)
 
         # Bias init like regular affine layer bias
-        stdv = 1. / math.sqrt(self.translators.size(-1))
+        stdv = 1.0 / math.sqrt(self.translators.size(-1))
         bias = torch.zeros((num_layers, 1, 1, hidden_dim), dtype=torch.bfloat16)
         self.bias = nn.parameter.Parameter(bias, requires_grad=True)
         self.bias.data.uniform_(-stdv, stdv)
 
-    def partial_forward(
-        self,
-        layer_activations: Tensor,
-        indices: List[int]
-    ) -> Tensor:
+    def partial_forward(self, layer_activations: Tensor, indices: List[int]) -> Tensor:
         """Forward pass on subset of translators given by indices."""
         layer_activations.to(torch.bfloat16)
         out = torch.einsum(
@@ -141,6 +141,7 @@ class DistributedTunedLens(nn.Module):
     wise. Also uses the `FlexModel` backend for fetching highly-distributed
     activation and parameter tensors.
     """
+
     def __init__(
         self,
         frozen_model: nn.Module,
@@ -158,24 +159,26 @@ class DistributedTunedLens(nn.Module):
         self.hidden_dim = hidden_dim
         self.lens_model_parallel_size = lens_model_parallel_size
         self.total_layers = len(getattr(frozen_model, layers_prefix))
-        self.all_layers = [
-            f"{layers_prefix}.{i}" for i in range(self.total_layers)
-        ]
-        logger.info(f"DistributedTunedLens: MP={self.lens_model_parallel_size}, "
-                    f"total_layers={self.total_layers}, "
-                    f"all_layers={self.all_layers}, ")
+        self.all_layers = [f"{layers_prefix}.{i}" for i in range(self.total_layers)]
+        logger.info(
+            f"DistributedTunedLens: MP={self.lens_model_parallel_size}, "
+            f"total_layers={self.total_layers}, "
+            f"all_layers={self.all_layers}, "
+        )
 
         # Init model parallel group
         tl_dist.initialize_lens_model_parallel(lens_model_parallel_size)
 
         # Init subset of layers for lens model parallel group
         stride = self.total_layers // lens_model_parallel_size
-        bottom = tl_dist.get_lens_model_parallel_rank() * stride 
+        bottom = tl_dist.get_lens_model_parallel_rank() * stride
         top = bottom + stride
         self.layers = [f"{layers_prefix}.{i}" for i in range(bottom, top)]
         self.num_layers = len(self.layers)
-        logger.info(f"Rank{tl_dist.get_lens_model_parallel_rank()}: {self.num_layers} "
-                    f"layers - {self.layers}")
+        logger.info(
+            f"Rank{tl_dist.get_lens_model_parallel_rank()}: {self.num_layers} "
+            f"layers - {self.layers}"
+        )
 
         # Canonicalize dtypes
         if dtype == "bf16":
@@ -186,7 +189,7 @@ class DistributedTunedLens(nn.Module):
             self.dtype = torch.float32
         else:
             raise Exception
-        
+
         # Init hooked model
         self.activation_dict: Dict[str, Tensor] = {}
         self.frozen_model = FlexModel(frozen_model, self.activation_dict)
@@ -200,31 +203,41 @@ class DistributedTunedLens(nn.Module):
             )
 
         # Init unembedding
-        unembed_weight = self.frozen_model.get_module_parameter(
-            unembed_prefix,
-            (self.vocab_size, self.hidden_dim),
-        ).cuda().to(self.dtype)
+        unembed_weight = (
+            self.frozen_model.get_module_parameter(
+                unembed_prefix,
+                (self.vocab_size, self.hidden_dim),
+            )
+            .cuda()
+            .to(self.dtype)
+        )
         self.unembed = Unembed(unembed_weight)
         self.unembed.requires_grad_(False)
 
         # Init layernorm
-        norm_weight = self.frozen_model.get_module_parameter(
-            norm_prefix,
-            (self.hidden_dim,),
-        ).cuda().to(self.dtype)
+        norm_weight = (
+            self.frozen_model.get_module_parameter(
+                norm_prefix,
+                (self.hidden_dim,),
+            )
+            .cuda()
+            .to(self.dtype)
+        )
         self.norm = Norm(norm_weight)
         self.norm.requires_grad_(False)
 
         # Init affine translators
         self.translators = Translators(
             hidden_dim=self.hidden_dim,
-            num_layers = self.num_layers,
+            num_layers=self.num_layers,
         ).cuda()
 
         logger.info(f"Initialized DistributedTunedLens: {self}")
         print(f"Parameter count: {count_parameters(self)}")
 
-    def _convert_layer_dict_to_list(self, layer_dict: Dict[str, Tensor]) -> List[Tensor]:
+    def _convert_layer_dict_to_list(
+        self, layer_dict: Dict[str, Tensor]
+    ) -> List[Tensor]:
         """Convert a dictionary containing layer names and tensors into a list.
 
         FlexModel returns activation tensors continuously into some dict, keyed
@@ -293,8 +306,10 @@ class DistributedTunedLens(nn.Module):
 
         # Log scatter logic
         if tl_dist.get_lens_model_parallel_rank() == 0:
-            logger.info(f"Rank{tl_dist.get_lens_model_parallel_rank()} Scatter: "
-                        f"[{len(objects) * len(objects[0])}] -> [{len(output_list)}]")
+            logger.info(
+                f"Rank{tl_dist.get_lens_model_parallel_rank()} Scatter: "
+                f"[{len(objects) * len(objects[0])}] -> [{len(output_list)}]"
+            )
         return output_list
 
     def streamed_loss(self, batch, loss_fn, chunks=4):
@@ -335,7 +350,9 @@ class DistributedTunedLens(nn.Module):
 
             # Run lens unembed on activations
             # See `forward` function below for explanation on residual connection
-            pred_logits = self.translators.partial_forward(act_chunk, indices) + act_chunk
+            pred_logits = (
+                self.translators.partial_forward(act_chunk, indices) + act_chunk
+            )
             pred_logits = self.norm(pred_logits)
             pred_logits = self.unembed(pred_logits)
 

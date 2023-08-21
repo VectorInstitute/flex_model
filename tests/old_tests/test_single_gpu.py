@@ -49,7 +49,7 @@ def test_simple_model():
 
     # Flex model forward hooks
     logger.info("Running flex model forward hooks")
-    
+
     test_flex_dict, _ = apply_flex_model_fwd_hooks(
         model,
         inputs,
@@ -63,7 +63,6 @@ def test_simple_model():
 
 
 def test_traversal_utils():
-
     target_tensor = torch.randn(2, 2)
     outputs = (
         (1, 3),

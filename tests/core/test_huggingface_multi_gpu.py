@@ -29,24 +29,67 @@ LLAMA_MODULES = {
     "lm_head_dummy": (None, None, None),
 }
 LLAMA_MODULES_FSDP = {
-    "_fsdp_wrapped_module.model.layers.5._fsdp_wrapped_module.self_attn": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.20._fsdp_wrapped_module.self_attn": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.39._fsdp_wrapped_module.self_attn": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.6._fsdp_wrapped_module.self_attn.o_proj_dummy": (None, None, 5120),
-    #"_fsdp_wrapped_module.model.layers.2._fsdp_wrapped_module.mlp.act_fn",
-    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.self_attn.v_proj_dummy": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.self_attn.k_proj_dummy": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.8._fsdp_wrapped_module.self_attn.q_proj_dummy": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.post_attention_layernorm": (None, None, 5120),
+    "_fsdp_wrapped_module.model.layers.5._fsdp_wrapped_module.self_attn": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.20._fsdp_wrapped_module.self_attn": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.39._fsdp_wrapped_module.self_attn": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.6._fsdp_wrapped_module.self_attn.o_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
+    # "_fsdp_wrapped_module.model.layers.2._fsdp_wrapped_module.mlp.act_fn",
+    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.self_attn.v_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.self_attn.k_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.8._fsdp_wrapped_module.self_attn.q_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
+    "_fsdp_wrapped_module.model.layers.11._fsdp_wrapped_module.post_attention_layernorm": (
+        None,
+        None,
+        5120,
+    ),
     "_fsdp_wrapped_module.model.layers.32._fsdp_wrapped_module.mlp": (None, None, 5120),
-    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.mlp.gate_proj_dummy": (None, None, 13824),
-    "_fsdp_wrapped_module.model.layers.28._fsdp_wrapped_module.mlp.up_proj_dummy": (None, None, 13824),
-    "_fsdp_wrapped_module.model.layers.9._fsdp_wrapped_module.mlp.down_proj_dummy": (None, None, 5120),
+    "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.mlp.gate_proj_dummy": (
+        None,
+        None,
+        13824,
+    ),
+    "_fsdp_wrapped_module.model.layers.28._fsdp_wrapped_module.mlp.up_proj_dummy": (
+        None,
+        None,
+        13824,
+    ),
+    "_fsdp_wrapped_module.model.layers.9._fsdp_wrapped_module.mlp.down_proj_dummy": (
+        None,
+        None,
+        5120,
+    ),
     "_fsdp_wrapped_module.model.embed_tokens": (None, None, 5120),
-    #"_fsdp_wrapped_module.model": (None, None, 5120),
+    # "_fsdp_wrapped_module.model": (None, None, 5120),
     "_fsdp_wrapped_module.model.layers.7": (None, None, 5120),
     "_fsdp_wrapped_module.lm_head_dummy": (None, None, 32000),
-
 }
 
 
@@ -87,12 +130,14 @@ def test_huggingface_llama():
         "What should I eat for dinner tonight?",
         "There's about three people going to",
     ]
-    
+
     inputs = tokenizer(
         prompts,
         padding="max_length",
         return_tensors="pt",
-    )["input_ids"].to(accelerator.device)
+    )[
+        "input_ids"
+    ].to(accelerator.device)
     print(inputs)
 
     # Multi-gpu FSDP
@@ -105,9 +150,7 @@ def test_huggingface_llama():
         data_parallel_size=2,
     )
     for module_name, expected_shape in LLAMA_MODULES_FSDP.items():
-        flex_model.register_hook_function(
-            HookFunction(module_name, expected_shape)
-        )
+        flex_model.register_hook_function(HookFunction(module_name, expected_shape))
 
     chunked_inputs = inputs.chunk(2, dim=0)
 
@@ -134,9 +177,7 @@ def test_huggingface_llama():
     flex_model = FlexModel(model, single_gpu_activations)
 
     for module_name, expected_shape in LLAMA_MODULES.items():
-        flex_model.register_hook_function(
-            HookFunction(module_name, expected_shape)
-        )
+        flex_model.register_hook_function(HookFunction(module_name, expected_shape))
 
     # Process microbatch 0
     _ = flex_model(chunked_inputs[0])
@@ -158,8 +199,10 @@ def test_huggingface_llama():
         assert torch.allclose(
             all_single_gpu_activations[k],
             multi_gpu_activations_[k],
-        ), (f"Failed: {k}, max diff: "
-            f"{(all_single_gpu_activations[k] - multi_gpu_activations_[k]).abs().max()}")
+        ), (
+            f"Failed: {k}, max diff: "
+            f"{(all_single_gpu_activations[k] - multi_gpu_activations_[k]).abs().max()}"
+        )
 
 
 test_huggingface_llama()

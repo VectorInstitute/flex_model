@@ -15,32 +15,38 @@ import torch
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ckpt_dir", type=str, default="/ssd005/projects/llm/llama/LLaMA/30B")
-    parser.add_argument("--output_dir", type=str, default="/ssd005/projects/llm/llama/LLaMA/30B_mp-1")
+    parser.add_argument(
+        "--ckpt_dir", type=str, default="/ssd005/projects/llm/llama/LLaMA/30B"
+    )
+    parser.add_argument(
+        "--output_dir", type=str, default="/ssd005/projects/llm/llama/LLaMA/30B_mp-1"
+    )
     parser.add_argument("--num_shards", type=int, default=1)
     args = parser.parse_args()
     return args
 
 
 LAYER_TYPES = {
-    'tok_embeddings': 'ParallelEmbedding',
-    'output': 'ColumnParallelLinear',
-    'wq': 'ColumnParallelLinear',
-    'wk': 'ColumnParallelLinear',
-    'wv': 'ColumnParallelLinear',
-    'wo': 'RowParallelLinear',
-    'w1': 'ColumnParallelLinear',
-    'w2': 'RowParallelLinear',
-    'w3': 'ColumnParallelLinear',
-    'attention_norm': None,
-    'ffn_norm': None,
-    'norm': None,
-    'rope': None,
+    "tok_embeddings": "ParallelEmbedding",
+    "output": "ColumnParallelLinear",
+    "wq": "ColumnParallelLinear",
+    "wk": "ColumnParallelLinear",
+    "wv": "ColumnParallelLinear",
+    "wo": "RowParallelLinear",
+    "w1": "ColumnParallelLinear",
+    "w2": "RowParallelLinear",
+    "w3": "ColumnParallelLinear",
+    "attention_norm": None,
+    "ffn_norm": None,
+    "norm": None,
+    "rope": None,
 }
 
 
 def main(args):
-    print(f"Resharding from: {args.ckpt_dir} to {args.output_dir} | MP={args.num_shards}")
+    print(
+        f"Resharding from: {args.ckpt_dir} to {args.output_dir} | MP={args.num_shards}"
+    )
     os.makedirs(args.output_dir, exist_ok=True)
 
     with open(Path(args.ckpt_dir) / "params.json", "r") as f:
@@ -65,7 +71,7 @@ def main(args):
         print(f"Resharding {name}...")
         sharded_tensors = [c[name] for c in checkpoints]
 
-        postfix = name.split(".")[-2]   # Prune out ".weight" suffix
+        postfix = name.split(".")[-2]  # Prune out ".weight" suffix
 
         assert postfix in LAYER_TYPES, f"key {name} not found"
 
@@ -83,8 +89,12 @@ def main(args):
                     dim=0,
                 )
                 merged = merged.reshape(dims, dims)
-                resharded = torch.chunk(merged.view(n_heads, dims_per_head, dims), args.num_shards, dim=0)
-                resharded = [t.reshape(dims // args.num_shards, dims) for t in resharded]
+                resharded = torch.chunk(
+                    merged.view(n_heads, dims_per_head, dims), args.num_shards, dim=0
+                )
+                resharded = [
+                    t.reshape(dims // args.num_shards, dims) for t in resharded
+                ]
             else:
                 merged = torch.cat(sharded_tensors, dim=-2)
                 resharded = torch.chunk(merged, args.num_shards, dim=-2)

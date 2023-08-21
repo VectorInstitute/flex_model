@@ -45,17 +45,14 @@ def parse_base_model_output_with_past(x):
 
 
 def dummy_editing_fn_with_log(x):
-    logger.info(
-        f"Running dummy editing function on tensor: {x.shape}"
-    )
+    logger.info(f"Running dummy editing function on tensor: {x.shape}")
     return x
 
 
 def module_comparison_mapping(ref_modules, cmp_modules):
     assert len(ref_modules) == len(cmp_modules)
     return {
-        ref_n: cmp_n
-        for ref_n, cmp_n in zip(ref_modules.keys(), cmp_modules.keys())
+        ref_n: cmp_n for ref_n, cmp_n in zip(ref_modules.keys(), cmp_modules.keys())
     }
 
 
@@ -81,12 +78,16 @@ def compare_tensor_dicts(
                 atol=2e-1,
                 rtol=1e-1,
             ):
-                logger.info(f"Allclose FAILED for {name1} - {name2}"
-                            f". Max diff: {torch.abs(act1 - act2).max()}")
+                logger.info(
+                    f"Allclose FAILED for {name1} - {name2}"
+                    f". Max diff: {torch.abs(act1 - act2).max()}"
+                )
 
             else:
-                logger.info(f"Allclose PASSED for {name1} - {name2}. "
-                            f"Max diff: {torch.abs(act1-act2).max()}")
+                logger.info(
+                    f"Allclose PASSED for {name1} - {name2}. "
+                    f"Max diff: {torch.abs(act1-act2).max()}"
+                )
         return True
 
 
@@ -128,11 +129,11 @@ def get_llama_13b_hf():
 
     tokenizer = AutoTokenizer.from_pretrained(
         "/ssd005/projects/llm/llama-2-13b-hf",
-        #"/scratch/ssd002/projects/opt_test/llama-13b-hf",
+        # "/scratch/ssd002/projects/opt_test/llama-13b-hf",
         local_files_only=True,
     )
-    tokenizer.pad_token_id=0
-    tokenizer.padding_side="right"
+    tokenizer.pad_token_id = 0
+    tokenizer.padding_side = "right"
 
     def tokenize(ps):
         return tokenizer(ps, padding=True, return_tensors="pt")["input_ids"]
@@ -142,6 +143,7 @@ def get_llama_13b_hf():
 
 def get_llama_13b_megatron():
     from llama import Llama
+
     generator = Llama.build(
         ckpt_dir="/ssd005/projects/llm/llama-2-13b",
         tokenizer_path="/ssd005/projects/llm/llama-2-13b/tokenizer.model",
@@ -152,7 +154,9 @@ def get_llama_13b_megatron():
     tokenizer = generator.tokenizer
 
     def tokenize(prompts):
-        input_tokens = [generator.tokenizer.encode(x, bos=True, eos=False) for x in prompts]
+        input_tokens = [
+            generator.tokenizer.encode(x, bos=True, eos=False) for x in prompts
+        ]
         bsz = len(input_tokens)
         total_len = max(len(t) for t in input_tokens)
         pad_id = 0
@@ -171,6 +175,7 @@ def apply_torch_fwd_hooks(
     parse_fn: Optional[Callable] = None,
 ) -> Dict[str, Tensor]:
     """Retrieve activation using vanilla pytorch forward hooks."""
+
     def _fwd_hook(
         registered_name: str,
         return_dict: Dict[str, Tensor],
@@ -215,6 +220,7 @@ def apply_torch_fwd_hooks(
         handle.remove()
 
     return output_dict, outputs
+
 
 def apply_flex_model_fwd_hooks(
     model: nn.Module,

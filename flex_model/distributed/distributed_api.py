@@ -70,7 +70,9 @@ def initialize_distributed_backend(
     data_parallel_size: int,
 ):
     """Main entry point from `FlexModel` to initialize distributed backend."""
-    assert world_size == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
+    assert (
+        world_size == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
+    )
     backend_cls = _parse_backend()
     logger.debug(f"Using DistributedBackend: {backend_cls.__name__}")
 
@@ -102,9 +104,9 @@ def _parse_backend():
     ps = PartialState()
 
     if (
-        ps.distributed_type == accelerate.DistributedType.DEEPSPEED or
-        ps.distributed_type == accelerate.DistributedType.FSDP or
-        ps.distributed_type == accelerate.DistributedType.MEGATRON_LM
+        ps.distributed_type == accelerate.DistributedType.DEEPSPEED
+        or ps.distributed_type == accelerate.DistributedType.FSDP
+        or ps.distributed_type == accelerate.DistributedType.MEGATRON_LM
     ):
         hf_distributed = True
     else:
@@ -116,8 +118,11 @@ def _parse_backend():
 
     # Using torch distributed only. Single-gpu case is covered by torch
     # backend.
-    elif (torch.distributed.is_initialized() and not hf_distributed or
-          not torch.distributed.is_initialized()):
+    elif (
+        torch.distributed.is_initialized()
+        and not hf_distributed
+        or not torch.distributed.is_initialized()
+    ):
         return _SUPPORTED_BACKENDS["torch"]
 
     # Unsupported
@@ -151,11 +156,13 @@ def in_tensor_parallel_group() -> bool:
     assert _ACTIVE_BACKEND is not None
     return _ACTIVE_BACKEND.in_tensor_parallel_group()
 
+
 def in_pipeline_parallel_group() -> bool:
     """Check if current worker belongs to a pipeline parallel group."""
     global _ACTIVE_BACKEND
     assert _ACTIVE_BACKEND is not None
     return _ACTIVE_BACKEND.in_pipeline_parallel_group()
+
 
 def in_data_parallel_group() -> bool:
     """Check if current worker belongs to a data parallel group."""

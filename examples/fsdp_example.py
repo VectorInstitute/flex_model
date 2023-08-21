@@ -11,8 +11,12 @@ from flex_model.core import FlexModel, HookFunction
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf")
-    parser.add_argument("--tokenizer_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf")
+    parser.add_argument(
+        "--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+    )
+    parser.add_argument(
+        "--tokenizer_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+    )
     args = parser.parse_args()
     return args
 
@@ -78,8 +82,11 @@ def main(args):
 
     # Split the batch across dp workers
     dp_worker_inputs = inputs.chunk(
-        accelerator.num_processes, dim=0,
-    )[accelerator.process_index].to(accelerator.device)
+        accelerator.num_processes,
+        dim=0,
+    )[
+        accelerator.process_index
+    ].to(accelerator.device)
 
     # Run through model to generate logits and activations
     logits = model(dp_worker_inputs)

@@ -108,7 +108,6 @@ def test_distributed_backend_api():
     raise NotImplementedError
 
 
-
 setup_logger("debug")
 test_initialize_and_destroy_activation_parallel()
 test_GPUDeviceMesh()
