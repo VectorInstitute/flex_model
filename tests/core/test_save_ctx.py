@@ -9,28 +9,10 @@ from flex_model.core import FlexModel, HookFunction
 import flex_model.distributed as dist
 from flex_model.utils import setup_logger
 from tests.registry import register_test
+from tests.test_utilities import make_model_and_tokenizer
 
 
 logger = logging.getLogger(__name__)
-
-
-@register_test
-def make_model_and_tokenizer():
-    model = AutoModelForCausalLM.from_pretrained(
-        "/ssd005/projects/llm/llama-2-13b-hf",
-        local_files_only=True,
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(
-        "/ssd005/projects/llm/llama-2-13b-hf",
-        local_files_only=True,
-    )
-    tokenizer.pad_token_id = 0
-    tokenizer.padding_side = "right"
-    tokenizer.model_max_length = 128
-
-    return model, tokenizer
 
 
 @register_test

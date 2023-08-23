@@ -53,7 +53,7 @@ def parse_collect_from_parameter_tensor(
     expected_shape: Tuple[Optional[int], ...],
 ) -> Callable:
     if not torch.distributed.is_initialized():
-        return dist.unity, dist.unity
+        return dist.unity
 
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
 

@@ -1,4 +1,5 @@
 import logging
+from typing import Tuple
 import os
 
 import fairscale.nn.model_parallel as mpu
@@ -12,6 +13,11 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 import torch.distributed as dist
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    LlamaTokenizer,
+)
 
 import flex_model.distributed as fm_dist
 
@@ -77,6 +83,25 @@ class Utils:
     def destroy_activation_parallel():
         fm_dist.destroy_activation_parallel()
         dist.barrier()
+
+
+def make_model_and_tokenizer() -> Tuple[nn.Module, LlamaTokenizer]:
+    """Helper function to construct a llama-2 model and tokenizer."""
+    model = AutoModelForCausalLM.from_pretrained(
+        "/model-weights/Llama-2-13b-hf",
+        local_files_only=True,
+        torch_dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        "/model-weights/Llama-2-13b-hf",
+        local_files_only=True,
+    )
+    tokenizer.pad_token_id = 0
+    tokenizer.padding_side = "right"
+    tokenizer.model_max_length = 128
+
+    return model, tokenizer
 
 
 def gather_weight(param: Tensor, dim: int):

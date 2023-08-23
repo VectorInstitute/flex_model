@@ -159,17 +159,20 @@ class FlexModel(nn.Module):
         """
         if not self._hooks_active:
 
-            submodules = {n: p for n, p in self.module.named_modules()}
             for module_name, hook_function in self.hook_functions.items():
-                submod = submodules.get(module_name, None)
+                wrapped_submodule = getattr(
+                    self.module,
+                    module_name,
+                    default=None,
+                )
 
-                if submod is None:
+                if wrapped_submodule is None:
                     raise NameError(
                         f"Hook function module name: {module_name} could not "
                         f"be found in the wrapped model."
                     )
 
-                handle = submod.register_forward_hook(
+                handle = wrapped_submodule.register_forward_hook(
                     hook_function,
                 )
                 self._hook_function_handles[module_name] = handle
@@ -226,9 +229,9 @@ class FlexModel(nn.Module):
         Args:
             parameter_name: Name of the wrapped module submodule parameter to
                 retrieve.
-            expected_shape: Shape of the full parameter tensor. Only the
-                dimensions which are sharded need to be provided. Other dimensions
-                can be annotated as `None` and will be auto-completed.
+            expected_shape: Shape of the full parameter tensor. This is
+                required so we can parse out which distributed process groups
+                we need to gather it across.
 
         Returns:
             The requested unsharded parameter tensor detached from the
@@ -271,9 +274,8 @@ class FlexModel(nn.Module):
         if self._hooks_active:
             outputs = self.module(*args, **kwargs)
         else:
-            with self.hooks():
+            with self.hooks:
                 outputs = self.module(*args, **kwargs)
-
         return outputs
 
     def _forward_no_hooks(self, *args, **kwargs) -> Any:
