@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 class GPUDeviceMesh:
     """Device mesh containing torch distributed groups.
 
-    Even with huggingface accelerate backend, torch distributed is still used.
+    Contains metadata on torch distributed groups facilitating tensor,
+    pipeline and data parallelism. See `build` for details on how these groups
+    are constructed.
     """
 
     tp_group_ranks: List[List[int]]
@@ -38,23 +40,16 @@ class GPUDeviceMesh:
                          [gpu8, gpu9, gpu10, gpu11],
                          [gpu12, gpu13, gpu14, gpu15],
 
-            pp groups -> NA (we don't gather across different layers)
+            pp groups -> [gpu0, gpu8]
 
-            megatron dp groups -> [gpu0, gpu8],
-                         [gpu1, gpu9],
-                         [gpu2, gpu10],
-                         [gpu3, gpu11],
-                         [gpu4, gpu12],
-                         [gpu5, gpu13],
-                         [gpu6, gpu14],
-                         [gpu7, gpu15],
-
-            our dp groups -> [gpu0, gpu8],
-                             [gpu4, gpu12],
+            dp groups -> [gpu0, gpu4],
+                         [gpu8, gpu12],
 
             Where gathering in the dp groups would need to be done
             hierarchically, starting from a gather across tp groups first
-            and then the gather across the dp groups.
+            and then the gather across the dp groups. Gathering the pipeline
+            parallel groups is done at the end of the forward pass when all
+            pipeline parallel ranks have their retrieved activations on CPU.
         """
         if world_size == 1:
             return cls([[0]], [[0]], [[0]])
@@ -64,24 +59,24 @@ class GPUDeviceMesh:
         num_dp_groups = pipeline_parallel_size
 
         mesh = torch.arange(world_size).reshape(
-            data_parallel_size,
             pipeline_parallel_size,
+            data_parallel_size,
             tensor_parallel_size,
         )
         # Build tensor parallel groups
         tp_group_ranks: List[List[int]] = []
-        for ranks in mesh.view(-1, tensor_parallel_size):
-            tp_group_ranks.append(ranks.tolist())
+        for i in range(len(mesh)):
+            for j in range(len(mesh[0])):
+                tp_group_ranks.append(mesh[i, j, :].tolist())
 
         # Build data parallel groups
         dp_group_ranks: List[List[int]] = []
-        for i in range(num_dp_groups):
-            dp_group_ranks.append(mesh[:, i, 0].tolist())
+        for i in range(len(mesh)):
+            dp_group_ranks.append(mesh[i, :, 0].tolist())
 
         # Build pipeline parallel groups
         pp_group_ranks: List[List[int]] = []
-        ranks = mesh[0, :, 0]
-        pp_group_ranks.append(ranks.tolist())
+        pp_group_ranks.append(mesh[:, 0, 0].tolist())
 
         logger.debug(
             f"Building GPUDeviceMesh with group ranks: "
@@ -94,6 +89,12 @@ class GPUDeviceMesh:
 
 
 class DistributedBackend(ABC):
+    """Basic interface for distributed backends.
+
+    Interface exposing core functions for distributed communication. The
+    distributed backends must implement tools for organizing models into a
+    3D (tensor, pipeline and parallel) mesh.
+    """
     @abstractmethod
     def initialize_activation_parallel(self) -> None:
         ...
@@ -156,7 +157,23 @@ class DistributedBackend(ABC):
 
 
 class TorchDistributedBackend(DistributedBackend):
+    """Distributed backend using for Pytorch distributed.
+
+    See parent class `DistributedBackend` for details.
+    """
     def __init__(self, device_mesh: GPUDeviceMesh):
+        """Instantiates the torch distributed backend.
+
+        all_tp_groups: Tensor parallel group handles for all tensor parallel
+            groups.
+        all_pp_groups: Pipeline parallel group handles for all pipeline parallel
+            groups
+        all_tp_groups: Data parallel group handles for all data parallel
+            groups
+        tp_group: Local device tensor parallel group.
+        pp_group: Local device pipeline parallel group.
+        dp_group: Local device data parallel group.
+        """
         self.device_mesh = device_mesh
         self.all_tp_groups: Optional[List[List[int]]] = None
         self.all_pp_groups: Optional[List[List[int]]] = None
@@ -166,6 +183,11 @@ class TorchDistributedBackend(DistributedBackend):
         self.dp_group: Optional[pt_dist.ProcessGroup] = None
 
     def initialize_activation_parallel(self) -> None:
+        """Initializes the torch distributed groups.
+
+        Constructs the torch distributed groups defined in the device mesh
+        and saves the corresponding group handles for the local device.
+        """
         assert self.tp_group is None and self.dp_group is None
         rank = pt_dist.get_rank()
 

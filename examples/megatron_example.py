@@ -6,17 +6,19 @@ from torch import Tensor
 from llama import Llama
 
 from flex_model.core import FlexModel, HookFunction
+from flex_model.utils import setup_logger
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--log_level", type=str, default="info")
     parser.add_argument(
-        "--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b"
+        "--checkpoint_dir", type=str, default="/model-weights/Llama-2-13b"
     )
     parser.add_argument(
         "--tokenizer_dir",
         type=str,
-        default="/ssd005/projects/llm/llama-2-13b/tokenizer.model",
+        default="/model-weights/Llama-2-13b/tokenizer.model",
     )
     args = parser.parse_args()
     return args
@@ -24,6 +26,8 @@ def parse_args():
 
 def main(args):
     """Forward pass through llama-2-13b which uses megatron for TP, PP, and DP."""
+    setup_logger(args.log_level)
+
     prompts = [
         "It's a nice day we're having",
         "The capital of Canada is",

@@ -23,7 +23,9 @@ def test_GPUDeviceMesh():
         (1, 4, 4),
         (4, 1, 4),
         (2, 2, 2),
+        (2, 4, 2)
     ]
+    # (tp, pp, dp)
     solutions = [
         [
             [[0]],
@@ -52,8 +54,10 @@ def test_GPUDeviceMesh():
         ],
         [
             [[i] for i in range(16)],
-            [[0, 1, 2, 3]],
-            [[0, 4, 8, 12], [1, 5, 9, 13], [2, 6, 10, 14], [3, 7, 11, 15]],
+            #[[0, 1, 2, 3]],
+            [[0, 4, 8, 12]],
+            [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]],
+
         ],
         [
             [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]],
@@ -62,8 +66,13 @@ def test_GPUDeviceMesh():
         ],
         [
             [[0, 1], [2, 3], [4, 5], [6, 7]],
-            [[0, 2]],
-            [[0, 4], [2, 6]],
+            [[0, 4]],
+            [[0, 2], [4, 6]],
+        ],
+        [
+            [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 13], [14, 15]],
+            [[0, 4, 8, 12]],
+            [[0, 2], [4, 6], [8, 10], [12, 14]],
         ],
     ]
     for case, solution in zip(cases, solutions):
@@ -72,9 +81,9 @@ def test_GPUDeviceMesh():
         dp = case[2]
         world_size = tp * pp * dp
         gpu_device_mesh = GPUDeviceMesh.build(world_size, tp, pp, dp)
-        assert gpu_device_mesh.tp_group_ranks == solution[0]
-        assert gpu_device_mesh.pp_group_ranks == solution[1]
-        assert gpu_device_mesh.dp_group_ranks == solution[2]
+        assert gpu_device_mesh.tp_group_ranks == solution[0], f"{case}"
+        assert gpu_device_mesh.pp_group_ranks == solution[1], f"{case}"
+        assert gpu_device_mesh.dp_group_ranks == solution[2], f"{case}"
 
 
 def test_initialize_and_destroy_activation_parallel():

@@ -31,7 +31,7 @@ LayerOutputs = Union[InternalObject, LeafObject, ScalarObject]
 logger = logging.getLogger(__name__)
 
 
-def _parse_edit_from_function(edit_function):
+def _parse_edit_from_function(edit_function: Callable):
     """Parse the user-provided editing function."""
     if edit_function is None:
         parsed_edit_function = default_editing_function
@@ -40,7 +40,7 @@ def _parse_edit_from_function(edit_function):
     return parsed_edit_function
 
 
-def _parse_dump_from_function(dump_function):
+def _parse_dump_from_function(dump_function: Callable):
     """Parse the provided dump function."""
     return dump_function
 
@@ -220,7 +220,20 @@ class HookFunction:
         inputs: Union[LayerOutputs, Tensor],
         outputs: Union[LayerOutputs, Tensor],
     ) -> Optional[LayerOutputs]:
-        """Internal template for hook function."""
+        """Hook function implementation.
+
+        Template function which contains the implementation of the hook
+        function. See the = `HookFunction` docstring for details.
+
+        Args:
+            module: Current hooked module.
+            inputs: Input to the current module.
+            outputs: Output of the current module.
+
+        Returns:
+            Potentially edited layer outputs. These outputs are sent as input
+            to the next layer.
+        """
         logger.debug(f"*{self.module_name}: Hook function activated*")
         tensor, _repack_layer_outputs = self._unpack_layer_outputs(
             outputs,
@@ -258,5 +271,10 @@ class HookFunction:
         inputs: Union[LayerOutputs, Tensor],
         outputs: Union[LayerOutputs, Tensor],
     ) -> LayerOutputs:
+        """Entrypoint to forward hook implementation.
+
+        Allows us to bind the entire `HookFunction` to an `nn.Module` and
+        treat it like a function.
+        """
         outputs = self._hook_function_template(module, inputs, outputs)
         return outputs
