@@ -12,7 +12,23 @@ logger = logging.getLogger(__name__)
 
 
 def _get_different_dim(shape1: Tuple[int, ...], shape2: Tuple[int, ...]) -> int:
-    """Find non-matching dims."""
+    """Find the indices of elements which differ between two tuples.
+
+    Get all indices where the first tuple does not match the second tuple. In
+    the context of tensor shapes, the non-matching indices correspond to
+    dimensions which are sharded.
+
+    Args:
+        shape1: The first tensor shape.
+        shape2: The second tensor shape.
+
+    Returns:
+        A single index of the matching dimension. If there all dimensions match
+        then returns -1.
+
+    Raises:
+        AssertionError: Two or more dimensions do not match.
+    """
     assert len(shape1) == len(shape2), "Shapes have different ndims"
     different_dims: List[int] = []
     for i in range(len(shape1)):
@@ -29,9 +45,25 @@ def _get_different_dim(shape1: Tuple[int, ...], shape2: Tuple[int, ...]) -> int:
 def _autofill_expected_shape(
     tensor: Tensor, expected_shape: Tuple[Optional[int], ...]
 ) -> Tuple[int, ...]:
-    """
-    Fill in unspecified dimensions in the expected shape of the full-size
-    activation.
+    """Complete the `None`-annotated tensor shape dimensions.
+
+    Compare the tensor shape and the expected shape. For dimensions in the
+    expected shape that are annotated as `None`, fill them in with the
+    corresponding dimension in the tensor shape. Note that if the user does
+    not annotate the correct dimension, then the collection of activations will
+    fail.
+
+    Args:
+        tensor: Local device tensor.
+        expected_shape: Shape of the non-sharded tensor.
+
+    Returns:
+        A tuple representing the filled-in expected shape with no `None`
+        annotations.
+
+    Raises:
+        AssertionError: There are a different number of dimensions in the
+        local device tensor compared to the expected shape.
     """
     tensor_shape = tensor.shape
     assert len(tensor_shape) == len(
@@ -52,6 +84,25 @@ def parse_collect_from_parameter_tensor(
     tensor: Tensor,
     expected_shape: Tuple[Optional[int], ...],
 ) -> Callable:
+    """Find the communication function which gathers the full parameter tensor.
+
+    Similar to gathering activations, parameter tensors can be gathered too as
+    a convenience. Given the local device parameter tensor, compare it to the
+    expected shape provided and infer the necessary collective communication
+    function required to assemble the unsharded parameter tensor.
+
+    Args:
+        tensor: Local device parameter tensor.
+        expected_shape: Shape of the non-sharded parameter tensor.
+
+    Returns:
+        Collective communication function which assembles the full parameter
+        tensor once called.
+
+    Raises:
+        AssertionError: Occurs if the sharding is not evenly distributed across
+            devices.
+    """
     if not torch.distributed.is_initialized():
         return dist.unity
 
@@ -88,7 +139,25 @@ def parse_collect_and_distribute_from_tensor(
     tensor: Tensor,
     expected_shape: Tuple[Optional[int], ...],
 ) -> Tuple[Callable, Callable]:
-    """Parse the activation tensor vs expected shape for distributed strategy."""
+    """Find the appropriate collect/disperse communication function.
+
+    Infers the correct collection and dispersion functions required to assemble
+    a full activation from local device shards and to disassemble a full
+    activation into local device shards respectively.
+
+    Args:
+        tensor: Local activation tensor
+        expected_shape: Shape of the non-sharded activation tensor.
+
+    Returns:
+        Collection and dispersion collective communication functions.
+
+    Raises:
+        AssertionError: Occurs if the sharding is not evenly distributed across
+            devices.
+        Exception: Occurs if the tensor parallel and data parallel world sizes
+            return invalid values.
+    """
     if not torch.distributed.is_initialized():
         return dist.unity, dist.unity
 

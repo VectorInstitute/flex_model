@@ -225,6 +225,12 @@ class TorchDistributedBackend(DistributedBackend):
             self.all_pp_groups.append(group_ranks)
 
     def activation_parallel_is_initialized(self) -> bool:
+        """Check if activation parallel backend has been initialized.
+
+        Returns:
+            True if any tensor, pipeline or data parallel groups have been
+            initialized.
+        """
         # DP groups only active on group rank0 TP workers, so this is
         # intersection not union
         if self.tp_group is None and self.dp_group is None and self.pp_group is None:
@@ -232,51 +238,64 @@ class TorchDistributedBackend(DistributedBackend):
         return True
 
     def in_tensor_parallel_group(self) -> bool:
+        """Check if local device is in a tensor parallel group."""
         return self.tp_group is not None
 
     def in_pipeline_parallel_group(self) -> bool:
+        """Check if local device is in a pipeline parallel group."""
         return self.pp_group is not None
 
     def in_data_parallel_group(self) -> bool:
+        """Check if local device is in a data parallel group."""
         return self.dp_group is not None
 
     def get_activation_tensor_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+        """Get the tensor parallel group handle the local device belongs to."""
         assert self.activation_parallel_is_initialized()
         return self.tp_group
 
     def get_activation_data_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+        """Get the pipeline parallel group handle the local device belongs to."""
         assert self.activation_parallel_is_initialized()
         return self.dp_group
 
     def get_activation_pipeline_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+        """Get the data parallel group handle the local device belongs to."""
         assert self.activation_parallel_is_initialized()
         return self.pp_group
 
     def get_activation_tensor_parallel_world_size(self) -> int:
+        """Get the number of devices in the tensor parallel group."""
         assert self.activation_parallel_is_initialized()
         return pt_dist.get_world_size(group=self.tp_group)
 
     def get_activation_data_parallel_world_size(self) -> int:
+        """Get the number of devices in the pipeline parallel group."""
         assert self.activation_parallel_is_initialized()
         return pt_dist.get_world_size(group=self.dp_group)
 
     def get_activation_pipeline_parallel_world_size(self) -> int:
+        """Get the number of devices in the data parallel group."""
         assert self.activation_parallel_is_initialized()
         return pt_dist.get_world_size(group=self.pp_group)
 
     def get_activation_tensor_parallel_rank(self) -> int:
+        """Get the rank of the local device in the tensor parallel group."""
         assert self.activation_parallel_is_initialized()
         return pt_dist.get_rank(group=self.tp_group)
 
     def get_activation_data_parallel_rank(self) -> int:
+        """Get the rank of the local device in the pipeline parallel group."""
         assert self.activation_parallel_is_initialized()
         return pt_dist.get_rank(group=self.dp_group)
 
     def get_activation_pipeline_parallel_rank(self) -> int:
+        """Get the rank of the local device in the data parallel group."""
         assert self.activation_parallel_is_initialized()
         return pt_dist.get_rank(group=self.pp_group)
 
     def destroy_activation_parallel(self) -> None:
+        """Delete all handles to tensor, pipeline and data parallel groups."""
         self.all_tp_groups = None
         self.all_pp_groups = None
         self.all_dp_groups = None

@@ -68,8 +68,20 @@ def initialize_distributed_backend(
     tensor_parallel_size: int,
     pipeline_parallel_size: int,
     data_parallel_size: int,
-):
-    """Main entry point from `FlexModel` to initialize distributed backend."""
+) -> None:
+    """Main entry point from `FlexModel` to initialize distributed backend.
+
+    Given tensor, pipeline and data parallel sharding scheme of the wrapped
+    `nn.Module`, detect which backend to use and assemble a GPU device mesh
+    which facilitates activation communication.
+
+    Args:
+        world_size: Total number of devices used to host the wrapped module.
+        tensor_parallel_size: Number of devices in each tensor parallel group.
+        pipeline_parallel_size: Number of devices in the pipeline parallel
+            group.
+        data_parallel_size: Number of devices in each data parallel group.
+    """
     assert (
         world_size == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
     )
@@ -87,18 +99,29 @@ def initialize_distributed_backend(
     _expose_distributed_backend(backend)
 
 
-def distributed_backend_is_initialized():
+def distributed_backend_is_initialized() -> bool:
+    """Check if the distributed backend has been selected and enabled."""
     global _ACTIVE_BACKEND
     return _ACTIVE_BACKEND is not None
 
 
 def destroy_distributed_backend():
+    """Disable and delete the active distributed backend."""
     global _ACTIVE_BACKEND
     _ACTIVE_BACKEND = None
 
 
 def _parse_backend():
-    """Figure out what distributed backend to use given current distributed state."""
+    """Parse the runtime distributed state and determine the backend to use.
+
+    Both Pytorch and huggingface use similar distributed backends, where
+    huggingface accelerate is a light wrapper over Pytorch distributed. To
+    figure out which backend is used, we can probe out various environment
+    and/or state variables.
+
+    Returns:
+        The corresponding `DistributedBackend` class to be instantiated.
+    """
     global _SUPPORTED_BACKENDS
 
     ps = PartialState()
