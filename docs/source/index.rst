@@ -10,7 +10,12 @@ Welcome to FlexModel's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-
+intro
+flex_model
+flex_model.core
+flex_model.distributed
+flex_model.traverse
+examples
 
 Indices and tables
 ==================
