@@ -52,11 +52,6 @@ class FlexModel(nn.Module):
         module: The wrapped Pytorch `nn.Module` to hook into.
         hook_functions: Collection of `HookFunction`s keyed by the module name
             to hook into.
-        _hook_function_handles: Collection of Pytorch hook function handles
-            which are generated when hook functions are enabled. Can be
-            deleted when hooks are disabled without deleting the underlying
-            `HookFunction` instances.
-        _hooks_active: Tracks if hooks are enabled/disabled.
         output_ptr: Pointer to output dictionary provided by the user.
             Activations will be streamed to here on the rank0 process only.
             Tensors will always be on CPU.
@@ -242,7 +237,14 @@ class FlexModel(nn.Module):
         full_param = collect_fn(local_param).cpu()
         return full_param
 
-    def _maybe_gather_pipeline_parallel(self) -> None:
+    def _gather_pipeline_parallel(self) -> None:
+        """Gathers output dicts across the pipeline parallel workers.
+
+        If the `FlexModel` instance is disributed across pipeline parallel
+        workers, then this function gathers the `output_dict`s to pipeline
+        parallel worker rank0. In the absence of pipeline parallelism, then
+        this function is a no-op. This function operates in-place.
+        """
         if (
             torch.distributed.is_initialized()
             and dist.in_pipeline_parallel_group()
@@ -319,38 +321,38 @@ class FlexModel(nn.Module):
         return outputs
 
 
-    def wrapped_module_requires_grad(self, level: bool) -> None:
+    def wrapped_module_requires_grad(self, requires_grad: bool) -> None:
         """Recursively enable/disable gradient on wrapped module submodules.
 
         Sets the `requires_grad` field recursively on all submodules of the
         wrapped model.
 
         Args:
-            level: True or False value for gradient tensor calculation.
+            requires_grad: True or False value for gradient tensor calculation.
         """
-        self.module.requires_grad_(level)
+        self.module.requires_grad_(requires_grad)
 
-    def trainable_modules_requires_grad(self, level: bool) -> None:
+    def trainable_modules_requires_grad(self, requires_grad: bool) -> None:
         """Recursively enable/disable gradient on trainable modules.
 
         Sets the `reqires_grad` field on all modules in the main
         `nn.ModuleDict` collection.
 
         Args:
-            level: True or False value for gradient tensor calculation.
+            requires_grad: True or False value for gradient tensor calculation.
         """
-        self.trainable_modules.requires_grad_(level)
+        self.trainable_modules.requires_grad_(requires_grad)
 
-    def all_modules_requires_grad(self, level: bool) -> None:
+    def all_modules_requires_grad(self, requires_grad: bool) -> None:
         """Recursively enable/disable gradient computation on all submodules.
 
         This is basically a combination of `wrapped_requires_grad()` and
         `trainable_modules_requires_grad`.
 
         Args:
-            level: True or False value for gradient tensor calculation.
+            requires_grad: True or False value for gradient tensor calculation.
         """
-        self.requires_grad_(False)
+        self.requires_grad_(requires_grad)
 
     @property
     def wrapped_module_names(self) -> List[str]:

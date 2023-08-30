@@ -158,7 +158,7 @@ def all_gather_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
     return output_tensor
 
 
-def all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
+def _all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
     """Unused."""
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
     tp_rank = dist.get_activation_tensor_parallel_rank()

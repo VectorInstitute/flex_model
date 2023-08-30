@@ -87,15 +87,6 @@ class HookFunction:
             and returns some edited function. Global contexts like the
             save context and trainable modules are available for use in the
             editing function runtime.
-        _collect: Collective communication function which gathers the sharded
-            activation tensors into a full activation tensor.
-        _disperse: Collective communication function which disperses the
-            full activation tensor into sharded activation tensors on their
-            respective ranks.
-        _edit: See `editing_function`.
-        _dump: Dump function used to save full activation tensors to CPU.
-        _output_ptr: Output dictionary keyed by module name to save the
-            full activations to.
         save_ctx: Global save context that is exposed to the
             `editing_function`.
         modules: Global trainable modules that are exposed to the
@@ -121,8 +112,8 @@ class HookFunction:
         self._disperse: Optional[Callable] = None
         self._edit: Optional[Callable] = None
         self._dump: Optional[Callable] = None
-
         self._output_ptr: Optional[Dict[str, Tensor]] = None
+
         self.save_ctx: Optional[Namespace] = None
         self.modules: Optional[nn.ModuleDict] = None
 
@@ -202,8 +193,7 @@ class HookFunction:
             tensor: (Potentially sharded) activation tensor to parse.
 
         Returns:
-            Nothing, but populates the attributes in the `HookFunction`
-            instance.
+            None.
         """
         self._collect, self._disperse = dist.parse_collect_and_distribute_from_tensor(
             tensor,
@@ -223,7 +213,7 @@ class HookFunction:
         """Hook function implementation.
 
         Template function which contains the implementation of the hook
-        function. See the = `HookFunction` docstring for details.
+        function. See the `HookFunction` docstring for details.
 
         Args:
             module: Current hooked module.
