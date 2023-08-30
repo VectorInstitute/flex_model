@@ -3,22 +3,18 @@ flex\_model.core
 
 .. currentmodule:: flex_model.core
 
+
 Modules
 -------
 
-.. autosummary::
-   :toctree: generated
-   :nosignatures:
+.. autoclass:: FlexModel
+   :members:
 
-   FlexModel
-   HookFunction
+.. autoclass:: HookFunction
+   :members:
 
 
 Miscellaneous
 -------------
 
-.. autosummary::
-   :toctree: generated
-   :nosignatures:
-
-   DummyModule
+.. autoclass:: DummyModule
