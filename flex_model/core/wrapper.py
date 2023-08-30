@@ -31,43 +31,37 @@ logger = logging.getLogger(__name__)
 
 
 class FlexModel(nn.Module):
-    """Pytorch module wrapper managing hooks and global contexts.
+    """Wraps a Pytorch :code:`nn.Module` to provide an interface for various
+    model-surgery techniques. Most importantly, allows registration of
+    user-instantiated :class:`HookFunction`s which perform model-surgery.
 
-    Wraps a Pytorch `nn.Module` and provides an interface for installing
-    `HookFunction` instances, corresponding to arbitrary submodules of the
-    wrapped module (see `HookFunction` for more info). These `HookFunction`s
-    enable activation retrieval/editing using Pytorch built-in forward and
-    backward hooks. 
+    :note: Supported features include:
 
-    Supported features include:
-        1. Registry, enabling and disabling of `HookFunction` instances.
-        2. Exposing necessary global state to all `HookFunction` "runtimes",
-            such as contexts for caching activations and trainable modules.
-        3. Setup of the distributed state comforming to tensor, pipeline and
-            data parallel distributed topologies.
-        4. Exposing miscellaneous convenience functions for getting/setting
-            attributes from the wrapped module.
+        * Registry, enabling and disabling of :class:`HookFunction` instances.
+        * Exposing global states to all :class:`Hookfunction` runtimes.
+        * Distributed orchestration of 1-D to 3-D parallelisms.
+        * Providing convenience functions for various attributes.
 
-    Attributes:
-        module: The wrapped Pytorch `nn.Module` to hook into.
-        hook_functions: Collection of `HookFunction`s keyed by the module name
-            to hook into.
-        output_ptr: Pointer to output dictionary provided by the user.
-            Activations will be streamed to here on the rank0 process only.
-            Tensors will always be on CPU.
-        save_ctx: Context for caching activations or other metadata for access
-            later in the same forward pass. For caching activations outside of
-            the forward pass, consider just retrieving them to the
-            `output_ptr`.
-        trainable_modules: Collection of named Pytorch modules/layers globally
-            accessible to all `HookFunction` runtimes. Can be trained by
-            calls to Pytorch `.backward()`. It is recommended that the
-            wrapped module is frozen when `.backward()` is called, else there
-            is a risk of CUDA out-of-memory errors due to materializing the
-            large model gradient.
-        tp_size: Tensor parallel dimension size.
-        pp_size: Pipeline parallel dimension size.
-        dp_size: data parallel dimension size.
+    :var nn.Module module: The wrapped Pytorch :code:`nn.Module` to hook into.
+    :var hook_functions: Collection of :class:`HookFunction`s keyed by the
+        module name to hook into.
+    :type hook_functions: Dict[str, HookFunction]:
+    :var output_ptr: Pointer to output dictionary provided by the user.
+        Activations will be streamed here on the rank0 process only. The
+        returned tensors will all be on CPU.
+    :type output_ptr: Dict[str, Tensor]
+    :var Namespace save_ctx: Context for caching activations or other metadata
+        to be accessed later within the same or a later forward pass.
+    :var nn.ModuleDict trainable_modules: Collection of named Pytorch
+        modules/layers globally accessible to all :class:`HookFunction`
+        runtimes. Can be trained using calls to :code:`.backward()`.
+    :var int tp_size: Tensor parallel dimension size.
+    :var int pp_size: Pipeline parallel dimension size.
+    :var int dp_size: Data parallel dimension size.
+
+    :note: Calls to `.backward()` should consider calling
+        :code:`wrapped_module_requires_grad(False)`, else the gradient will be
+        generated for the entire wrapped model and :code:`trainable_modules`.
     """
     # TODO: Backward hook refactor
     # TODO: Tests for each function independently
@@ -319,7 +313,6 @@ class FlexModel(nn.Module):
         self._maybe_gather_pipeline_parallel()
 
         return outputs
-
 
     def wrapped_module_requires_grad(self, requires_grad: bool) -> None:
         """Recursively enable/disable gradient on wrapped module submodules.
