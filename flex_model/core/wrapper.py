@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 class FlexModel(nn.Module):
     """Wraps a Pytorch :code:`nn.Module` to provide an interface for various
     model-surgery techniques. Most importantly, allows registration of
-    user-instantiated :class:`HookFunction`s which perform model-surgery.
+    user-instantiated :class:`HookFunction` classes which perform
+    model-surgery.
 
     :note: Supported features include:
 
@@ -59,9 +60,9 @@ class FlexModel(nn.Module):
     :var int pp_size: Pipeline parallel dimension size.
     :var int dp_size: Data parallel dimension size.
 
-    :note: Calls to `.backward()` should consider calling
-        :code:`wrapped_module_requires_grad(False)`, else the gradient will be
-        generated for the entire wrapped model and :code:`trainable_modules`.
+    :note: Calls to `.backward()` should consider calling :code:`wrapped_module_requires_grad(False)`,
+        else the gradient will be generated for the entire wrapped model and
+        :code:`trainable_modules`.
     """
     # TODO: Backward hook refactor
     # TODO: Tests for each function independently

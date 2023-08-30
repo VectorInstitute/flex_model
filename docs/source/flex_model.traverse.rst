@@ -1,29 +1,30 @@
 flex\_model.traverse package
 ============================
 
-Submodules
-----------
+.. currentmodule:: flex_model.traverse
 
-flex\_model.traverse.nodes module
----------------------------------
 
-.. automodule:: flex_model.traverse.nodes
-   :members:
-   :undoc-members:
-   :show-inheritance:
+Ops
+---
 
-flex\_model.traverse.ops module
--------------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. automodule:: flex_model.traverse.ops
-   :members:
-   :undoc-members:
-   :show-inheritance:
+    flatten
+    unflatten
 
-Module contents
----------------
 
-.. automodule:: flex_model.traverse
-   :members:
-   :undoc-members:
-   :show-inheritance:
+Nodes
+-----
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    InternalObject
+    LeafObject
+    ScalarObject
+    InternalNode
+    LeafNode
+    ScalarNode
