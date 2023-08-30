@@ -24,7 +24,6 @@ from .mappings import (
     broadcast_data_parallel,
     all_gather_tensor_parallel,
     all_gather_data_parallel,
-    all_reduce_tensor_parallel,
     scatter_tensor_parallel,
     scatter_data_parallel,
     gather_pipeline_parallel,

@@ -1,37 +1,24 @@
-flex\_model.core package
+flex\_model.core
 ========================
 
-Submodules
-----------
+.. currentmodule:: flex_model.core
 
-flex\_model.core.core\_utils module
------------------------------------
+Modules
+-------
 
-.. automodule:: flex_model.core.core_utils
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
 
-flex\_model.core.hook\_function module
---------------------------------------
+   FlexModel
+   HookFunction
 
-.. automodule:: flex_model.core.hook_function
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
-flex\_model.core.wrapper module
--------------------------------
+Miscellaneous
+-------------
 
-.. automodule:: flex_model.core.wrapper
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
 
-Module contents
----------------
-
-.. automodule:: flex_model.core
-   :members:
-   :undoc-members:
-   :show-inheritance:
+   DummyModule

@@ -10,7 +10,6 @@ Subpackages
    flex_model.core
    flex_model.distributed
    flex_model.traverse
-   flex_model.tunedlens
 
 Submodules
 ----------

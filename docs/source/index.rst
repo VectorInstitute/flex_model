@@ -6,16 +6,27 @@
 Welcome to FlexModel's documentation!
 =====================================
 
+FlexModel is a wrapper for Pytorch models which exposes powerful primitives
+for model surgery and introspection.
+
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+   :maxdepth: 1
+   :caption: Getting Started
 
    intro
-   flex_model
+   examples
+
+
+Python API
+----------
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Python API:
+
    flex_model.core
    flex_model.distributed
    flex_model.traverse
-   examples
 
 Indices and tables
 ==================

@@ -11,3 +11,5 @@ __pycache__/
 llama/
 *.logits
 transformers/
+
+docs/build/
