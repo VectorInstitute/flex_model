@@ -28,6 +28,15 @@ Python API
    flex_model.distributed
    flex_model.traverse
 
+
+TODOs
+-----
+* Add documentation for :code:`flex_model.traverse` :code:`flatten` and :code:`unflatten`
+  functions.
+* Support for backward hooks.
+* Finish tests for main codebase classes and functions.
+
+
 Indices and tables
 ==================
 
