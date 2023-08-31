@@ -1,3 +1,8 @@
+from .backends import (
+    GPUDeviceMesh,
+    TorchDistributedBackend,
+)
+
 from .distributed_api import (
     initialize_distributed_backend,
     distributed_backend_is_initialized,

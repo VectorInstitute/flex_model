@@ -28,8 +28,7 @@ for model surgery and introspection.
 
 TODOs
 -----
-* Add documentation for :code:`flex_model.traverse` :code:`flatten` and :code:`unflatten`
-  functions.
+* Copy docs from :code:`TorchDistributedBackend` to the distributed API.
 * Support for backward hooks.
 * Finish tests for main codebase classes and functions.
 

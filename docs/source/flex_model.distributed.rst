@@ -4,6 +4,17 @@ flex\_model.distributed package
 .. currentmodule:: flex_model.distributed
 
 
+Backends
+--------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    GPUDeviceMesh
+    TorchDistributedBackend
+
+
 Distributed API
 ---------------
 
@@ -14,21 +25,6 @@ Distributed API
     initialize_distributed_backend
     distributed_backend_is_initialized
     destroy_distributed_backend
-    initialize_activation_parallel
-    activation_parallel_is_initialized
-    in_tensor_parallel_group
-    in_pipeline_parallel_group
-    in_data_parallel_group
-    get_activation_tensor_parallel_group
-    get_activation_pipeline_parallel_group
-    get_activation_data_parallel_group
-    get_activation_tensor_parallel_world_size
-    get_activation_pipeline_parallel_world_size
-    get_activation_data_parallel_world_size
-    get_activation_tensor_parallel_rank
-    get_activation_pipeline_parallel_rank
-    get_activation_data_parallel_rank
-    destroy_activation_parallel
 
 
 Mappings
