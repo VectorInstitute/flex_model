@@ -9,6 +9,7 @@ from typing import (
     Callable,
     Tuple,
     Generator,
+    Iterator,
     Union,
 )
 
@@ -63,6 +64,45 @@ class FlexModel(nn.Module):
     :note: Calls to `.backward()` should consider calling :code:`wrapped_module_requires_grad(False)`,
         else the gradient will be generated for the entire wrapped model and
         :code:`trainable_modules`.
+
+    Example:
+
+    .. highlight:: python
+    .. code-block:: python
+
+        ## Code block being run by 4 GPUs ##
+
+        # Load model.
+        model = MyModel.from_pretrained(...)
+
+        # Distribute model over many workers using fully-sharded data parallel.
+        model = FSDP(model)
+
+        # Create output dictionary where activations will stream to.
+        output_dict = {}
+
+        # Wrap the model.
+        flex_model = FlexModel(
+            model,
+            output_dict,
+            tensor_parallel_size=1,
+            pipeline_parallel_size=1,
+            data_parallel_size=4,
+        )
+
+        # Create hook function for post-mlp.
+        my_hook_function = HookFunction(
+            "my_model.layers.15.mlp",
+            expected_shape=(16, 1024, 4096),
+            editing_function=None,
+        )
+
+        # Register the hook function.
+        flex_model.register_hook_function(my_hook_function)
+
+        # Run forward pass. Output dictionary will become populated.
+        outputs = flex_model(inputs)
+
     """
     # TODO: Backward hook refactor
     # TODO: Tests for each function independently
@@ -77,15 +117,15 @@ class FlexModel(nn.Module):
     ):
         """Initialize the instance by wrapping the Pytorch module.
 
-        Args:
-            module: `nn.Module` to hook into.
-            output_ptr: Output dictionary to dump activations to.
-            tensor_parallel_size: Number of processes in each tensor parallel
-                group.
-            pipeline_parallel_size: Number of processes in each pipeline
-                parallel group.
-            data_parallel_size: Number of processes in each data parallel
-                group.
+        :param nn.Module module: :code:`nn.Module` to wrap and apply hooks to.
+        :param output_ptr: Output dictionary to dump activations to.
+        :type output_ptr: Dict[str, Tensor]
+        :param int tensor_parallel_size: Number of workers in each tensor
+            parallel group.
+        :param int pipeline_parallel_size: Number of workers in each pipeline
+            parallel group.
+        :param int data_parallel_size: Number of processes in each data
+            parallel group.
         """
         super().__init__()
         self.module = module
@@ -110,14 +150,14 @@ class FlexModel(nn.Module):
             dist.initialize_activation_parallel()
 
     def register_hook_function(self, hook_function: HookFunction) -> None:
-        """Register a user-defined `HookFunction`.
+        """Register a user-defined `HookFunction` instance.
 
-        Given a `HookFunction` attach any necessary global context such as
-        the activation output dictionary. Save it into the `FlexModel`s
-        `HookFunction` collection keyed by the module name to hook into.
+        Given a :class:`HookFunction` attach any necessary global context such as
+        the activation output dictionary. Save it into the :class:`FlexModel`s
+        :class:`HookFunction` collection keyed by the module name to hook into.
 
-        Args:
-            hook_function: User-defined `HookFunction` instance to register.
+        :param HookFunction hook_function: User-defined :class:`HookFunction` instance
+            to register.
         """
         hook_function._output_ptr = self.output_ptr
         hook_function.save_ctx = self.save_ctx
@@ -125,14 +165,13 @@ class FlexModel(nn.Module):
         self.hook_functions[hook_function.module_name] = hook_function
 
     def register_trainable_module(self, name: str, module: nn.Module) -> None:
-        """Register some trainable layers accessible to all `HookFunction`s.
+        """Register some trainable layers accessible to all :class:`HookFunction`s.
 
-        Given an `nn.Module` add it to the `nn.ModuleDict` which is exposed
-        to all `HookFunction` runtimes.
+        Given an :code:`nn.Module`, add it to the :code:`nn.ModuleDict` which is exposed
+        to all :class:`HookFunction` runtimes.
 
-        Args:
-            name: Name of the module/layer.
-            module: `nn.Module` to register.
+        :param str name: Name of the module/layer.
+        :param nn.Module module: :code:`nn.Module` to register.
         """
         self.trainable_modules[name] = module
 
@@ -142,10 +181,9 @@ class FlexModel(nn.Module):
         Takes all registered `HookFunction` instances and registers them into
         the wrapped module to run during the model forward pass.
 
-        Raises:
-            NameError: Module name associated with a `HookFunction` was not
-                found in the wrapped module, hence the `HookFunction` would be
-                unused.
+        :raises NameError: Module name associated with a :class:`HookFunction` was not
+            found in the wrapped module, hence the :class:`HookFunction` would be
+            unused.
         """
         if not self._hooks_active:
 
@@ -172,7 +210,7 @@ class FlexModel(nn.Module):
     def disable_forward_hooks(self) -> None:
         """Un-set forward hooks in the wrapped module indefinitely.
 
-        Takes all registered and active forward `HookFunction` handles and
+        Takes all registered and active forward :class:`HookFunction` handles and
         deletes them.
         """
         if self._hooks_active:
@@ -184,17 +222,17 @@ class FlexModel(nn.Module):
             self._hooks_active = False
 
     @contextmanager
-    def hooks(self) -> Generator:
+    def hooks(self) -> Iterator[None]:
         """Context manager for applying forward hooks.
 
         Enables hooks within the context. When the context is exited, the
-        hooks are disabled. State like the `save_ctx` and `trainable_modules`
+        hooks are disabled. State like the :code:`save_ctx` and :code:`trainable_modules`
         is persistent between entrance and exit of this context manager. Hence
         this context manager mainly controls when activations are retrieved
         and/or edited.
 
-        Yields:
-            Nothing, just manages setup and shutdown of `HookFunction`s.
+        :return Iterator[None]: Yields nothing as it just manages setup and
+            teardown of hooks.
         """
         self.enable_forward_hooks()
         try:
@@ -213,16 +251,15 @@ class FlexModel(nn.Module):
         across the relevant process group if necessary and return it to the
         user on CPU.
 
-        Args:
-            parameter_name: Name of the wrapped module submodule parameter to
-                retrieve.
-            expected_shape: Shape of the full parameter tensor. Only the
-                dimensions which are sharded need to be provided. Other dimensions
-                can be annotated as `None` and will be auto-completed.
+        :param str parameter_name: Name of the wrapped module submodule parameter to
+            retrieve.
+        :param expected_shape: Shape of the full parameter tensor. Only the
+            dimensions which are sharded need to be provided. Other dimensions
+            can be annotated as `None` and will be auto-completed.
+        :type expected_shape: Tuple[int, ...]
 
-        Returns:
-            The requested unsharded parameter tensor detached from the
-            computation graph and on CPU.
+        :return Tensor: The requested unsharded parameter tensor detached from
+            the computation graph and on CPU.
         """
         local_param = self.module.get_parameter(parameter_name).detach()
         collect_fn = dist.parse_collect_from_parameter_tensor(
@@ -233,12 +270,11 @@ class FlexModel(nn.Module):
         return full_param
 
     def _gather_pipeline_parallel(self) -> None:
-        """Gathers output dicts across the pipeline parallel workers.
+        """Gathers output dicts across the pipeline parallel workers to global
+        rank0.
 
-        If the `FlexModel` instance is disributed across pipeline parallel
-        workers, then this function gathers the `output_dict`s to pipeline
-        parallel worker rank0. In the absence of pipeline parallelism, then
-        this function is a no-op. This function operates in-place.
+        :note: If :code:`pipeline_parallel_size == 1`, then this function
+            is a no-op.
         """
         if (
             torch.distributed.is_initialized()
@@ -264,6 +300,8 @@ class FlexModel(nn.Module):
         are disabled, then we briefly enable them with the context manager
         which disables them again automatically after the forward pass has
         completed.
+
+        :return Any: The output of the wrapped model.
         """
         if self._hooks_active:
             outputs = self.module(*args, **kwargs)
@@ -280,6 +318,8 @@ class FlexModel(nn.Module):
         forward pass, then enable them again after the forward pass is
         completed. If the hooks are disabled, then we simply run the forward
         pass.
+
+        :return Any: The output of the wrapped model.
         """
         if self._hooks_active:
             self.disable_forward_hooks()
@@ -297,54 +337,50 @@ class FlexModel(nn.Module):
         Primary entrypoint where activations are generated and potentially
         retrieved and/or edited.
 
-        Args:
-            with_hooks: Boolean flag which can temporarily disable hooks. The
-                default behaviour is to always run with hooks.
-            *args, **kwargs: Arbitrary user-provided input arguments for
-                performing a forward pass on the wrapped module.
+        :param bool with_hooks: Boolean flag which can temporarily disable
+            hooks. The default behaviour is to always run with hooks.
 
-        Returns:
-            Arbitrary output of the wrapped module.
+        :return Any: Output of the wrapped module.
         """
         if with_hooks:
             outputs = self._forward_with_hooks(*args, **kwargs)
         else:
             outputs = self._forward_no_hooks(*args, **kwargs)
 
-        self._maybe_gather_pipeline_parallel()
+        self._gather_pipeline_parallel()
 
         return outputs
 
     def wrapped_module_requires_grad(self, requires_grad: bool) -> None:
         """Recursively enable/disable gradient on wrapped module submodules.
 
-        Sets the `requires_grad` field recursively on all submodules of the
+        Sets the :code:`requires_grad` field recursively on all submodules of the
         wrapped model.
 
-        Args:
-            requires_grad: True or False value for gradient tensor calculation.
+        :param bool requires_grad: True or False value for gradient tensor
+            calculation.
         """
         self.module.requires_grad_(requires_grad)
 
     def trainable_modules_requires_grad(self, requires_grad: bool) -> None:
         """Recursively enable/disable gradient on trainable modules.
 
-        Sets the `reqires_grad` field on all modules in the main
+        Sets the :code:`reqires_grad` field on all modules in the main
         `nn.ModuleDict` collection.
 
-        Args:
-            requires_grad: True or False value for gradient tensor calculation.
+        :param bool requires_grad: True or False value for gradient tensor
+            calculation.
         """
         self.trainable_modules.requires_grad_(requires_grad)
 
     def all_modules_requires_grad(self, requires_grad: bool) -> None:
         """Recursively enable/disable gradient computation on all submodules.
 
-        This is basically a combination of `wrapped_requires_grad()` and
-        `trainable_modules_requires_grad`.
+        This is basically a combination of :code:`wrapped_requires_grad` and
+        :code:`trainable_modules_requires_grad`.
 
-        Args:
-            requires_grad: True or False value for gradient tensor calculation.
+        :param bool requires_grad: True or False value for gradient tensor
+            calculation.
         """
         self.requires_grad_(requires_grad)
 
@@ -352,7 +388,7 @@ class FlexModel(nn.Module):
     def wrapped_module_names(self) -> List[str]:
         """Names of wrapped module submodules.
 
-        Helper function to get the names of all wrapped module submodules.
+        :return List[str]: List of module names.
         """
         return [n for n, _ in self.module.named_modules()]
 
@@ -360,7 +396,7 @@ class FlexModel(nn.Module):
     def trainable_modules_names(self) -> List[str]:
         """Names of trainable modules.
 
-        Helper function to get the names of all trainable modules.
+        :return List[str]: List of module names.
         """
         return [n for n in self.trainable_modules.keys()]
 
@@ -368,10 +404,9 @@ class FlexModel(nn.Module):
     def all_modules_names(self) -> List[str]:
         """Names of all submodules.
 
-        Helper function which gets the names of both wrapped module submodules
-        and trainable modules.
+        :return List[str]: List of module names.
         """
-        return self.wrapped_module_names() + self.trainable_module_names()
+        return self.wrapped_module_names + self.trainable_module_names
 
     def _clear_all_state_(self) -> None:
         """Destroy all `HookFunction` and distributed state.
@@ -394,7 +429,8 @@ class FlexModel(nn.Module):
 
         Explicit destruction of `FlexModel` state while leaving the wrapped
         model invariant.
+
+        :return nn.Module: The original wrapped module.
         """
         self._clear_all_state()
         return self.module
-

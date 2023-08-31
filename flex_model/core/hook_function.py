@@ -31,8 +31,16 @@ LayerOutputs = Union[InternalObject, LeafObject, ScalarObject]
 logger = logging.getLogger(__name__)
 
 
-def _parse_edit_from_function(edit_function: Callable):
-    """Parse the user-provided editing function."""
+def _parse_edit_from_function(edit_function: Callable) -> Callable:
+    """Parse the user-provided editing function.
+
+    :note: This is the default parser for editing functions.
+
+    :param Callable edit_function: User-defined editing function.
+
+    :return Callable: Parsed editing function.
+    """
+    # TODO: Move to `distributed.parse`
     if edit_function is None:
         parsed_edit_function = default_editing_function
     else:
@@ -41,7 +49,15 @@ def _parse_edit_from_function(edit_function: Callable):
 
 
 def _parse_dump_from_function(dump_function: Callable):
-    """Parse the provided dump function."""
+    """Parse the provided dump function.
+
+    :note: This is the default parser for dump functions.
+
+    :param Callable dump_function: Dump function.
+
+    :return Callable: Parsed dump function.
+    """
+    # TODO: Move to `distributed.parse`
     return dump_function
 
 
@@ -51,6 +67,24 @@ def default_editing_function(
     save_ctx: Namespace,
     modules: nn.ModuleDict,
 ) -> Tensor:
+    """No-op editing function for logging and debug purposes.
+
+    :note: This editing function showcases the expected function signature for
+        custom editing functions.
+
+    :note: If no editing function is provided for a :code:`HookFunction`, then
+        this is the default editing function.
+
+    :param nn.Module current_module: Submodule instance hooked into.
+    :param Tensor inputs: Activation tensor produced during the forward pass of
+        the :code:`current_module`.
+    :param Namespace save_ctx: Save context pointer where cached data can be
+        accessed or stored.
+    :param nn.ModuleDict: Pointer to trainable modules globally exposed to all
+        :class:`HookFunction` instances.
+
+    :return Tensor: Edited (or not) activation tensor
+    """
     logger.debug(f"Running default editing function on tensor: {inputs.shape}")
     return inputs
 
@@ -58,39 +92,63 @@ def default_editing_function(
 class HookFunction:
     """Function which retrieves/edits activations in a Pytorch `nn.Module`.
 
-    Wraps a user-provided `editing_function` which must have the same function
-    signature as `default_editing_function`. The runtime within the editing
-    function is single-threaded, so the user does not have to think about
-    how the model is sharded across processes. An instance of this class is
-    registered into a submodule with the same `module_name`. The full
-    activation tensor is materialized and exposed to the `editing_function`
-    runtime by parsing the `expected_shape`.
+    The user provides the :code:`module_name` of the target submodule. The user
+    can optionally pass in an :code:`editing_function` containing arbitrarily complex
+    python code, which will be used to edit the full submodule activation
+    tensor. If certain dimensions of the activation tensor are expected to be
+    sharded over distributed workers, the user must also provide an
+    :code:`expected_shape` hint so the activation tensor can be assembled.
 
-    Activations are processed in a fixed way, templated out in
-    `_hook_function_template`. The local activation tensor is parsed according
-    to the expected shape and distributed device mesh to figure out what
-    collective communication functions are needed to gather/disperse it. The
-    collection function is run to materialize the full activation tensor. Then
-    the pipeline parallel rank0 processes dump the tensor to their CPU. Next,
-    the user-provided `editing_function` is run on the full activation tensor.
-    Finally, the activation tensor is dispersed back to the necessary ranks
-    for further propagation of the forward pass. Also note that layer outputs
-    can be arbitrary python objects, so unpacking/repacking is done using
-    the `FlexModel.traversal` library.
+    :var str module_name: Name of the :code:`nn.Module` submodule to hook into.
+    :var expected_shape: Shape of the full activation tensor. Only the
+        dimensions which are sharded need to be provided. Other dimensions
+        can be annotated as :code:`None` and will be auto-completed.
+    :type expected_shape: Tuple[Optional[int], ...]
+    :var editing_function: Function which is run on the full activation tensor
+        and returns some edited function. Global contexts like the
+        save context and trainable modules are available for use in the
+        editing function runtime.
+    :type editing_function: Optional[Callable]
+    :var save_ctx: Global save context that is exposed to the
+        :code:`editing_function`.
+    :type save_ctx: Optional[Namespace]
+    :var modules: Global trainable modules that are exposed to the
+        :code:`editing_function`.
+    :type modules: Optional[nn.ModuleDict]
 
-    Attributes:
-        module_name: Name of the `nn.Module` submodule to hook into.
-        expected_shape: Shape of the full activation tensor. Only the
-            dimensions which are sharded need to be provided. Other dimensions
-            can be annotated as `None` and will be auto-completed.
-        editing_function: Function which is run on the full activation tensor
-            and returns some edited function. Global contexts like the
-            save context and trainable modules are available for use in the
-            editing function runtime.
-        save_ctx: Global save context that is exposed to the
-            `editing_function`.
-        modules: Global trainable modules that are exposed to the
-            `editing_function`.
+    :note: :code:`save_ctx` and :code:`modules` are populated when the :class:`HookFunction`
+        is registered with a :class:`FlexModel` instance.
+
+    Example:
+
+    .. highlight:: python
+    .. code-block:: python
+
+        # Define editing function to be run on an activation tensor.
+        def my_editing_function(current_module,
+                                inputs,
+                                save_ctx,
+                                modules) -> Tensor:
+
+            # Cache data for later.
+            _, s, _ = torch.svd(inputs)
+            save_ctx.activation_singular_values = s
+
+            # Edit the activation tensor.
+            inputs = torch.where(inputs > 1.0, inputs, 0.0)
+
+            # Apply a torch layer to the activation tensor.
+            outputs = modules["linear_projection"](inputs)
+            
+            # Pass edited activation tensor to next layer.
+            return outputs
+
+        # Instantiate registration-ready hook function.
+        my_hook_function = HookFunction(
+            "my_model.layers.16.self_attention",
+            expected_shape=(4, 512, 5120),
+            editing_function=my_editing_function,
+        )
     """
 
     def __init__(
@@ -99,14 +157,23 @@ class HookFunction:
         expected_shape: Tuple[Optional[int], ...],
         editing_function: Optional[Callable] = None,
     ) -> None:
-        """Initializes the instance by wrapping the `editing_function`.
+        """Initializes the instance by wrapping the :code:`editing_function`.
 
-        Args:
-            See class docstring.
+        :param str module_name: Name of the :code:`nn.Module` submodule to hook
+            into.
+        :param expected_shape: Shape of the full activation tensor.
+        :type expected_shape: Tuple[Optional[int], ...]
+        :param editing_function: Function which edits the activation
+            tensor.
+        :type editing_function: Optional[Callable]
         """
         self.module_name = module_name
         self.expected_shape = expected_shape
-        self.editing_function = editing_function
+
+        if editing_function is None:
+            self.editing_function = default_editing_function
+        else:
+            self.editing_function = editing_function
 
         self._collect: Optional[Callable] = None
         self._disperse: Optional[Callable] = None
@@ -125,23 +192,21 @@ class HookFunction:
 
         The output of model layers can be arbitrary python objects, so this
         function unpacks this object and separates out Pytorch tensors using
-        the `FlexModel.traverse` library. Outputs are sorted into `treedef`s
-        and `leaves`. The `treedef`s define the structure of the object, and
-        the `leaves` correspond to a list of the found tensors. When the
+        the :code:`FlexModel.traverse` library. Outputs are sorted into :code:`treedef`
+        and :code:`leaves`. The :code:`treedef` define the structure of the object, and
+        the :code:`leaves` correspond to a list of the found tensors. When the
         activation tensor needs to be sent to the next layer at the end of
-        the `HookFunction` execution, the returned `_repack` function
+        the :class:`HookFunction` execution, the returned :code:`_repack` function
         reconstructs the layer output.
 
-        Args:
-            outputs: The current module's layer outputs.
+        :param outputs: The current module's layer outputs.
+        :type outputs: Union[LayerOutputs, Tensor]
 
-        Returns:
-            The (potentially sharded) activation tensor and a function to
-            reverse the unpacking operation.
+        :return Tuple[Tensor, partial]: The (potentially sharded) activation
+            tensor and a function to undo the unpacking operation.
 
-        Raises:
-            AssertionError: Occurs if no tensor is found at all in the layer
-                outputs.
+        :raises AssertionError: Occurs if no tensor is found at all in the
+            layer outputs.
         """
         treedef, leaves = flatten(outputs)
 
@@ -169,12 +234,10 @@ class HookFunction:
         Default function for binding an activation to the user-provided
         activation dictionary.
 
-        Args:
-            activation: Full activation tensor to save.
+        :param Tensor activation: Full activation tensor to save.
 
-        Raises:
-            AssertionError: Occurs if there is no activation dictionary that
-                is bound the `HookFunction` instance to save to.
+        :raises AssertionError: Occurs if there is no activation dictionary that
+            is bound the :class:`HookFunction` instance to save to.
         """
         assert self._output_ptr is not None
         dumped_tensor = activation.detach().cpu()
@@ -183,17 +246,13 @@ class HookFunction:
     def _parse_tensor(self, tensor: Tensor) -> None:
         """Runs parsers for collection/dispersion, editing and dumping.
 
-        Populates the `_collect`, `_disperse`, `_edit` and `_dump` functions
-        during runtime depending on:
+        Populates the :code:`_collect`, :code:`_disperse`, :code:`_edit` and
+        :code:`_dump` functions during runtime. The results of which depend on:
             1. The distributed device mesh
             2. The shape of the (potentially sharded) activation tensor
             3. The expected shape of the full activation tensor.
 
-        Args:
-            tensor: (Potentially sharded) activation tensor to parse.
-
-        Returns:
-            None.
+        :param Tensor tensor: (Potentially sharded) activation tensor to parse.
         """
         self._collect, self._disperse = dist.parse_collect_and_distribute_from_tensor(
             tensor,
@@ -209,46 +268,57 @@ class HookFunction:
         module: nn.Module,
         inputs: Union[LayerOutputs, Tensor],
         outputs: Union[LayerOutputs, Tensor],
-    ) -> Optional[LayerOutputs]:
-        """Hook function implementation.
+    ) -> Union[LayerOutputs, Tensor]:
+        """Hook function implementation called by Pytorch after registration.
 
         Template function which contains the implementation of the hook
-        function. See the `HookFunction` docstring for details.
+        function. See the :class:`HookFunction` docstring for details.
 
-        Args:
-            module: Current hooked module.
-            inputs: Input to the current module.
-            outputs: Output of the current module.
+        :param nn.Module module: Current hooked module.
+        :param inputs: Input to the current module.
+        :type inputs: Union[LayerOutputs, Tensor]
+        :param outputs: Output of the current module.
+        :type outputs: Union[LayerOutputs, Tensor]
 
-        Returns:
-            Potentially edited layer outputs. These outputs are sent as input
-            to the next layer.
+        :return Union[LayerOutputs, Tensor] Potentially edited layer outputs.
+            These outputs are sent as input to the next layer.
+
+        :raise AssertionError: Start activation tensor shape is not the same as
+            the ending activation tensor shape.
         """
         logger.debug(f"*{self.module_name}: Hook function activated*")
+
+        # Separate local activation tensor from rest of layer outputs.
         tensor, _repack_layer_outputs = self._unpack_layer_outputs(
             outputs,
         )
         # Debugging
         start_shape = tensor.shape
 
+        # Poplate the collection and dispersion functions.
         if self._collect is None and self._disperse is None:
             self._parse_tensor(tensor)
 
+        # Collect the activation tensor across workers.
         tensor = self._collect(tensor)
 
-        # Need PP group members to send layer activations to head rank0
+        # Rank0 of each pipeline parallel group dumps to local output
+        # dictionaries and runs editing functions.
         if not torch.distributed.is_initialized() or (
             dist.activation_parallel_is_initialized()
             and dist.in_pipeline_parallel_group()
         ):
-            # Dump then edit: See V-composition analysis algo
+            # Dump then edit: See V-composition analysis algo.
             self._dump(tensor)
 
             tensor = self._edit(module, tensor, self.save_ctx, self.modules)
 
+        # Disperse the activation tensor back to respective workers.
         tensor = self._disperse(tensor)
         end_shape = tensor.shape
 
+        # Repack the local activation tensor back into the rest of the layer
+        # outputs.
         outputs = _repack_layer_outputs(tensor)
 
         assert start_shape == end_shape
@@ -263,8 +333,17 @@ class HookFunction:
     ) -> LayerOutputs:
         """Entrypoint to forward hook implementation.
 
-        Allows us to bind the entire `HookFunction` to an `nn.Module` and
-        treat it like a function.
+        Allows us to bind the entire :class:`HookFunction` to an :code:`nn.Module`
+        using Pytorch hook registration.
+
+        :param nn.Module module: Hooked submodule.
+        :param inputs: Hooked submodule inputs.
+        :type inputs: Union[LayerOutputs, Tensor]
+        :param outputs: Hooked submodule outputs.
+        :type outputs: Union[LayerOutputs, Tensor]
+
+        :note: Inputs do not matter since hooks are run after the submodule has
+            completed its forward pass.
         """
         outputs = self._hook_function_template(module, inputs, outputs)
         return outputs
