@@ -13,3 +13,4 @@ llama/
 transformers/
 
 docs/build/
+docs/source/generated
