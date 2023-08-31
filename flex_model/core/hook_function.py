@@ -38,7 +38,8 @@ def _parse_edit_from_function(edit_function: Callable) -> Callable:
 
     :param Callable edit_function: User-defined editing function.
 
-    :return Callable: Parsed editing function.
+    :returns: Parsed editing function.
+    :rtype: Callable
     """
     # TODO: Move to `distributed.parse`
     if edit_function is None:
@@ -55,7 +56,8 @@ def _parse_dump_from_function(dump_function: Callable):
 
     :param Callable dump_function: Dump function.
 
-    :return Callable: Parsed dump function.
+    :returns: Parsed dump function.
+    :rtype: Callable
     """
     # TODO: Move to `distributed.parse`
     return dump_function
@@ -83,7 +85,8 @@ def default_editing_function(
     :param nn.ModuleDict: Pointer to trainable modules globally exposed to all
         :class:`HookFunction` instances.
 
-    :return Tensor: Edited (or not) activation tensor
+    :returns: Edited (or not) activation tensor
+    :rtype: Tensor
     """
     logger.debug(f"Running default editing function on tensor: {inputs.shape}")
     return inputs
@@ -202,8 +205,9 @@ class HookFunction:
         :param outputs: The current module's layer outputs.
         :type outputs: Union[LayerOutputs, Tensor]
 
-        :return Tuple[Tensor, partial]: The (potentially sharded) activation
+        :returns: The (potentially sharded) activation
             tensor and a function to undo the unpacking operation.
+        :rtype: Tuple[Tensor, partial]
 
         :raises AssertionError: Occurs if no tensor is found at all in the
             layer outputs.
@@ -280,8 +284,9 @@ class HookFunction:
         :param outputs: Output of the current module.
         :type outputs: Union[LayerOutputs, Tensor]
 
-        :return Union[LayerOutputs, Tensor] Potentially edited layer outputs.
+        :returns: Potentially edited layer outputs.
             These outputs are sent as input to the next layer.
+        :rtype: Union[LayerOutputs, Tensor]
 
         :raise AssertionError: Start activation tensor shape is not the same as
             the ending activation tensor shape.

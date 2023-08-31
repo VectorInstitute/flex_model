@@ -45,8 +45,8 @@ class FlexModel(nn.Module):
         * Providing convenience functions for various attributes.
 
     :var nn.Module module: The wrapped Pytorch :code:`nn.Module` to hook into.
-    :var hook_functions: Collection of :class:`HookFunction`s keyed by the
-        module name to hook into.
+    :var hook_functions: Collection of :class:`HookFunction` instances keyed by
+        the module name to hook into.
     :type hook_functions: Dict[str, HookFunction]:
     :var output_ptr: Pointer to output dictionary provided by the user.
         Activations will be streamed here on the rank0 process only. The
@@ -165,7 +165,7 @@ class FlexModel(nn.Module):
         self.hook_functions[hook_function.module_name] = hook_function
 
     def register_trainable_module(self, name: str, module: nn.Module) -> None:
-        """Register some trainable layers accessible to all :class:`HookFunction`s.
+        """Register trainable module accessible to all :class:`HookFunction` instances.
 
         Given an :code:`nn.Module`, add it to the :code:`nn.ModuleDict` which is exposed
         to all :class:`HookFunction` runtimes.
@@ -231,8 +231,9 @@ class FlexModel(nn.Module):
         this context manager mainly controls when activations are retrieved
         and/or edited.
 
-        :return Iterator[None]: Yields nothing as it just manages setup and
+        :returns: Yields nothing as it just manages setup and
             teardown of hooks.
+        :rtype: Iterator[None]
         """
         self.enable_forward_hooks()
         try:
@@ -258,8 +259,9 @@ class FlexModel(nn.Module):
             can be annotated as `None` and will be auto-completed.
         :type expected_shape: Tuple[int, ...]
 
-        :return Tensor: The requested unsharded parameter tensor detached from
+        :returns: The requested unsharded parameter tensor detached from
             the computation graph and on CPU.
+        :rtype: Tensor
         """
         local_param = self.module.get_parameter(parameter_name).detach()
         collect_fn = dist.parse_collect_from_parameter_tensor(
@@ -301,7 +303,8 @@ class FlexModel(nn.Module):
         which disables them again automatically after the forward pass has
         completed.
 
-        :return Any: The output of the wrapped model.
+        :returns: The output of the wrapped model.
+        :rtype: Any
         """
         if self._hooks_active:
             outputs = self.module(*args, **kwargs)
@@ -319,7 +322,8 @@ class FlexModel(nn.Module):
         completed. If the hooks are disabled, then we simply run the forward
         pass.
 
-        :return Any: The output of the wrapped model.
+        :returns: The output of the wrapped model.
+        :rtype: Any
         """
         if self._hooks_active:
             self.disable_forward_hooks()
@@ -340,7 +344,8 @@ class FlexModel(nn.Module):
         :param bool with_hooks: Boolean flag which can temporarily disable
             hooks. The default behaviour is to always run with hooks.
 
-        :return Any: Output of the wrapped module.
+        :returns: Output of the wrapped module.
+        :rtype: Any
         """
         if with_hooks:
             outputs = self._forward_with_hooks(*args, **kwargs)
@@ -388,7 +393,8 @@ class FlexModel(nn.Module):
     def wrapped_module_names(self) -> List[str]:
         """Names of wrapped module submodules.
 
-        :return List[str]: List of module names.
+        :returns: List of module names.
+        :rtype: List[str]
         """
         return [n for n, _ in self.module.named_modules()]
 
@@ -396,7 +402,8 @@ class FlexModel(nn.Module):
     def trainable_modules_names(self) -> List[str]:
         """Names of trainable modules.
 
-        :return List[str]: List of module names.
+        :returns: List of module names.
+        :rtype: List[str]
         """
         return [n for n in self.trainable_modules.keys()]
 
@@ -404,7 +411,8 @@ class FlexModel(nn.Module):
     def all_modules_names(self) -> List[str]:
         """Names of all submodules.
 
-        :return List[str]: List of module names.
+        :returns: List of module names.
+        :rtype: List[str]
         """
         return self.wrapped_module_names + self.trainable_module_names
 
@@ -430,7 +438,8 @@ class FlexModel(nn.Module):
         Explicit destruction of `FlexModel` state while leaving the wrapped
         model invariant.
 
-        :return nn.Module: The original wrapped module.
+        :returns: The original wrapped module.
+        :rtype: nn.Module
         """
         self._clear_all_state()
         return self.module
