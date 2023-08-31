@@ -75,12 +75,12 @@ def initialize_distributed_backend(
     `nn.Module`, detect which backend to use and assemble a GPU device mesh
     which facilitates activation communication.
 
-    Args:
-        world_size: Total number of devices used to host the wrapped module.
-        tensor_parallel_size: Number of devices in each tensor parallel group.
-        pipeline_parallel_size: Number of devices in the pipeline parallel
-            group.
-        data_parallel_size: Number of devices in each data parallel group.
+    :param int world_size: Total number of devices used to host the wrapped module.
+    :param int tensor_parallel_size: Number of devices in each tensor parallel
+        group.
+    :param int pipeline_parallel_size: Number of devices in the pipeline parallel
+        group.
+    :param int data_parallel_size: Number of devices in each data parallel group.
     """
     assert (
         world_size == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
