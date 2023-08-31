@@ -17,9 +17,6 @@ for model surgery and introspection.
    examples
 
 
-Python API
-----------
-
 .. toctree::
    :maxdepth: 1
    :caption: Python API:

@@ -13,8 +13,10 @@ logger = logging.getLogger(__name__)
 def unity(tensor: Tensor) -> Tensor:
     """No-op function.
 
-    Args:
-        tensor: Activation tensor.
+    :param Tensor tensor: Activation tensor.
+
+    :returns: Input tensor unmodified.
+    :rtype: Tensor
     """
     logger.debug(f"Unity | IN:   {tensor.shape}")
     return tensor
@@ -23,11 +25,10 @@ def unity(tensor: Tensor) -> Tensor:
 def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
     """Send a copy of the tensor to all members of the tensor parallel group.
 
-    Args:
-        tensor: Tensor to broadcast.
+    :param Tensor tensor: Tensor to broadcast.
 
-    Returns:
-        All tensor parallel ranks will get the same tensor.
+    :returns: All tensor parallel ranks will get the same tensor.
+    :rtype: Tensor
     """
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
     tp_group = dist.get_activation_tensor_parallel_group()
@@ -50,11 +51,10 @@ def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
 def broadcast_data_parallel(tensor: Tensor) -> Tensor:
     """Send a copy of the data to all members of the data parallel group.
 
-    Args:
-        tensor: Tensor to broadcast.
+    :param Tensor tensor: Tensor to broadcast.
 
-    Returns:
-        All data parallel ranks will get the same tensor.
+    :returns: All data parallel ranks will get the same tensor.
+    :rtype: Tensor
     """
     if not dist.in_data_parallel_group():
         return tensor
@@ -86,12 +86,11 @@ def all_gather_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
     will have [T0, T1] and gpu1 will also have [T0, T1]. A concatenation is
     done after the communication to generate a single tensor.
 
-    Args:
-        tensor: Tensor to all-gather.
-        dim: Dimension to concatenate the gathered tensors along.
+    :param Tensor tensor: Tensor to all-gather.
+    :param int dim: Dimension to concatenate the gathered tensors along.
 
-    Returns:
-        The gathered and concatenated tensor.
+    :returns: The gathered and concatenated tensor.
+    :rtype: Tensor
     """
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
     tp_rank = dist.get_activation_tensor_parallel_rank()
@@ -125,12 +124,11 @@ def all_gather_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
     will have [T0, T1] and gpu1 will also have [T0, T1]. A concatenation is
     done after the communication to generate a single tensor.
 
-    Args:
-        tensor: Tensor to all-gather.
-        dim: Dimension to concatenate the gathered tensors along.
+    :param Tensor tensor: Tensor to all-gather.
+    :param int dim: Dimension to concatenate the gathered tensors along.
 
-    Returns:
-        The gathered and concatenated tensor.
+    :returns: The gathered and concatenated tensor.
+    :rtype: Tensor
     """
     if not dist.in_data_parallel_group():
         return tensor
@@ -178,7 +176,7 @@ def _all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
     return tensor
 
 
-def scatter_tensor_parallel(tensor: Tensor, dim: int = -1):
+def scatter_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
     """Chunk a tensor and send chunks to corresponding tensor parallel ranks.
 
     Given a tensor, chunk it along a specific dimension. Each device rank will
@@ -188,12 +186,11 @@ def scatter_tensor_parallel(tensor: Tensor, dim: int = -1):
     tensor T, so each rank instead discards all chunks besides their own
     corresponding chunk.
 
-    Args:
-        tensor: Tensor to scatter.
-        dim: Dimension to chunk the tensor along.
+    :param Tensor tensor: Tensor to scatter.
+    :param int dim: Dimension to chunk the tensor along.
 
-    Returns:
-        The corresponding chunk of the full tensor.
+    :returns: The corresponding chunk of the full tensor.
+    :rtype: Tensor
     """
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
     tp_rank = dist.get_activation_tensor_parallel_rank()
@@ -208,7 +205,7 @@ def scatter_tensor_parallel(tensor: Tensor, dim: int = -1):
     return output_tensor
 
 
-def scatter_data_parallel(tensor: Tensor, dim: int = 0):
+def scatter_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
     """Chunk a tensor and send chunks to corresponding data parallel ranks.
 
     Given a tensor, chunk it along a specific dimension. Each device rank will
@@ -218,12 +215,11 @@ def scatter_data_parallel(tensor: Tensor, dim: int = 0):
     tensor T, so each rank instead discards all chunks besides their own
     corresponding chunk.
 
-    Args:
-        tensor: Tensor to scatter.
-        dim: Dimension to chunk the tensor along.
+    :param Tensor tensor: Tensor to scatter.
+    :param int dim: Dimension to chunk the tensor along.
 
-    Returns:
-        The corresponding chunk of the full tensor.
+    :returns: The corresponding chunk of the full tensor.
+    :rtype: Tensor
     """
     if not dist.in_data_parallel_group():
         return tensor
@@ -247,11 +243,10 @@ def gather_pipeline_parallel(objects: Any) -> Any:
     Takes a pickle-able collection of python objects and tensors and sends
     them to rank0 in the pipeline parallel group.
 
-    Args:
-        objects: Some python object that can be pickled. May contain tensors.
+    :param Any objects: Some python object that can be pickled. May contain tensors.
 
-    Returns:
-        A collection of the objects sent from all pipeline paralel group ranks.
+    :returns: A collection of the objects sent from all pipeline paralel group ranks.
+    :rtype: Any
     """
     if not dist.in_pipeline_parallel_group():
         return objects
