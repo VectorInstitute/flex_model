@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 from typing import Dict
 from argparse import Namespace
-from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from functools import partial
 from tests.registry import register_test
