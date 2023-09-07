@@ -441,5 +441,5 @@ class FlexModel(nn.Module):
         :returns: The original wrapped module.
         :rtype: nn.Module
         """
-        self._clear_all_state()
+        self._clear_all_state_()
         return self.module
