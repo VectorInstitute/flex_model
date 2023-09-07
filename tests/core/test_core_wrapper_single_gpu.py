@@ -52,12 +52,6 @@ def test_register_hook_function():
     model = make_model()
     model.cuda()
 
-    # inputs = tokenizer(
-    #     prompts,
-    #     padding="max_length",
-    #     return_tensors="pt",
-    # )["input_ids"].cuda()
-
     activations = {}
     model = FlexModel(
         model,
@@ -81,7 +75,8 @@ def test_register_hook_function():
 def test_register_trainable_module():
     """
     Tests if a trainable module is registered correctly, and that all hook
-    functions (regardless of when they're added), have a pointer to this module
+    functions (regardless of when they're added), have a pointer to this
+    module.
     """
     model = make_model()
     model.cuda()
@@ -113,52 +108,110 @@ def test_register_trainable_module():
 
 
 @register_test
-def test_wrapped_requires_grad():
+def test_wrapped_module_requires_grad():
     """
     Test whether all parameters in the wrapped module do/don't require grad
-    upon calling this function.
+    upon calling this method.
     """
     model = make_model()
     model.cuda
 
     activations = {}
+    trainable_module = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
     model = FlexModel(
         model,
         activations,
     )
+    model.register_trainable_module("test", trainable_module)
 
-    model.wrapped_requires_grad(True)
-    for _, p in model.named_parameters():
+    model.wrapped_module_requires_grad(True)
+    for _, p in model.module.named_parameters():
         assert p.requires_grad is True
-    
-    model.wrapped_requires_grad(False)
-    for _, p in model.named_parameters():
+
+    model.wrapped_module_requires_grad(False)
+    for _, p in model.module.named_parameters():
         assert p.requires_grad is False
+
+    for train_mod in model.trainable_modules.values():
+        for _, p in train_mod.named_parameters():
+            assert p.requires_grad is True
 
 
 @register_test
 def test_trainable_modules_requires_grad():
     """
-    Test to ensure *only* the added trainable module
+    Test to ensure *only* the added trainable module is affected by upon
+    calling this method.
     """
     model = make_model()
     model.cuda
 
     activations = {}
+    trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
+    trainable_module_2 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
     model = FlexModel(
         model,
         activations,
     )
+    model.register_trainable_module("test1", trainable_module_1)
+    model.register_trainable_module("test2", trainable_module_2)
 
-    model.wrapped_requires_grad(True)
-    for _, p in model.named_parameters():
+    model.trainable_modules_requires_grad(True)
+    model.wrapped_module_requires_grad(True)
+
+    for train_mod in model.trainable_modules.values():
+        for _, p in train_mod.named_parameters():
+            assert p.requires_grad is True
+
+    for _, p in model.module.named_parameters():
         assert p.requires_grad is True
-    
-    model.wrapped_requires_grad(False)
-    for _, p in model.named_parameters():
-        assert p.requires_grad is False
+
+    model.trainable_modules_requires_grad(False)
+    for train_mod in model.trainable_modules.values():
+        for _, p in train_mod.named_parameters():
+            assert p.requires_grad is False
+
+    for _, p in model.module.named_parameters():
+        assert p.requires_grad is True
 
 
-# test_register_hook_function()
-# test_register_trainable_module()
-test_wrapped_requires_grad()
+@register_test
+def test_destroy():
+    """
+    Tests the destroy method to ensure everything is cleared appropriately.
+    """
+    model = make_model()
+    model.cuda
+
+    activations = {}
+    trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
+    trainable_module_2 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
+    model = FlexModel(
+        model,
+        activations,
+    )
+    model.register_trainable_module("test1", trainable_module_1)
+    model.register_trainable_module("test2", trainable_module_2)
+
+    my_hook_function = HookFunction(
+        MODULE_NAME_1,
+        expected_shape=(None, None, None),
+    )
+
+    model.register_hook_function(my_hook_function)
+    model.destroy()
+    breakpoint()
+
+    assert model.hook_functions == {}
+    assert model._hook_function_handles == {}
+    assert model._hooks_active is False
+    assert model.output_ptr is activations
+    assert len(model.trainable_modules) == 0
+    assert model.save_ctx == Namespace()
+
+
+test_register_hook_function()
+test_register_trainable_module()
+test_wrapped_module_requires_grad()
+test_trainable_modules_requires_grad()
+test_destroy()

@@ -129,7 +129,7 @@ def test_hook_function():
     )
 
     model.register_hook_function(my_hook_function)
-    model(inputs)
+    model(inputs, with_hooks=True)
 
     assert torch.equal(ground_truth, activations["modified"])
 
