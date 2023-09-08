@@ -49,13 +49,11 @@ class FlexModel(nn.Module):
         activations.
 
     :var nn.Module module: The wrapped Pytorch :code:`nn.Module` to hook into.
-    :var hook_functions: Collection of :class:`HookFunction` instances keyed by
-        the module name to hook into.
-    :type hook_functions: Dict[str, HookFunction]:
-    :var output_ptr: Pointer to output dictionary provided by the user.
-        Activations will be streamed here on the rank0 process only. The
-        returned tensors will all be on CPU.
-    :type output_ptr: Dict[str, Tensor]
+    :var Dict[str, HookFunction] hook_functions: Collection of :class:`HookFunction`
+        instances keyed by the module name to hook into.
+    :var Dict[str, Tensor] output_ptr: Pointer to output dictionary provided by
+        the user. Activations will be streamed here on the rank0 process only.
+        The returned tensors will all be on CPU.
     :var Namespace save_ctx: Context for caching activations or other metadata
         to be accessed later within the same or a later forward pass.
     :var nn.ModuleDict trainable_modules: Collection of named Pytorch
