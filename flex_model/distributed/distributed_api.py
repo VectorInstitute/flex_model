@@ -4,42 +4,26 @@ User has some model on 1+ GPUs, using some sort of distributed backed
 (typically accelerate or torch distributed). First find out which
 backend is being used in the __init__method of the core `FlexModel` class.
 
-Notes:
-- We always assume distributed backend is initialized already, ie. torch
-  has already called `init_process_groups`.
-- Additionally, we leave primitives like `torch.dsitributed.get_rank()` to
-  torch instead of wrapping them.
+:note: We always assume distributed backend is initialized already, ie. torch
+    has already called `init_process_groups`.
+:note: Additionally, we leave primitives like `torch.dsitributed.get_rank()` to
+    torch instead of wrapping them.
 
-Viable states:
-    1. Single-gpu no torch dist
-    2. Single-gpu w/ torch dist
-    3. Multi-gpu w/ torch dist
+:note: Viable states
+    * Single-gpu no torch dist
+    * Single-gpu w/ torch dist
+    * Multi-gpu w/ torch dist
 
-Guards:
-- In the presence of torch distributed, every rank is in a TP group. However,
-  not every rank is in a DP or PP group. Therefore we must guard collectives
-  depending on presence within DP or PP groups.
-
-Flow:
--> FlexModel.__init__: Call to initialize_distributed_backend(...)
--> initialize_distributed_backend(...): Call to parse_backend(...)
-    -> Returns accelerate, torch or single-GPU
--> initialize_distributed_backend(...): Call to GPUDeviceMesh.build(...)
-    -> Returns GPUDeviceMesh populated with torch dist groups
--> initialize_distributed_backend(...): Initialize DistributedBackend(mesh)
--> Set DistributedBackend public API methods as global distributed prims
-    -> Some fn. should take the DistributedBackend public API methods and link
-       them to the __init__.py publically exposed functions
-    -> Ie. Fn. registers DistributedBackend as as active, and all the
-       exposed functions access the current active backend.
-    -> Ex. def init_act_parallel():
-                global ACTIVE_BACKEND
-                return ACTIVE_BACKEND.init_act_parallel()
+:note: Guards
+    * In the presence of torch distributed, every rank is in a TP group. However,
+    not every rank is in a DP or PP group. Therefore we must guard collectives
+    depending on presence within DP or PP groups.
 """
+
 from __future__ import annotations
 from dataclasses import dataclass
 import logging
-from typing import List, Optional
+from typing import List, Optional, Type
 
 import torch
 import torch.distributed as pt_dist
@@ -68,8 +52,23 @@ def initialize_distributed_backend(
     tensor_parallel_size: int,
     pipeline_parallel_size: int,
     data_parallel_size: int,
-):
-    """Main entry point from `FlexModel` to initialize distributed backend."""
+) -> None:
+    """Main entry point from :class:`FlexModel` to initialize distributed backend.
+
+    Given tensor, pipeline and data parallel sharding scheme of the wrapped
+    :code:`nn.Module`, detect which backend to use and assemble a GPU device mesh
+    which facilitates activation communication.
+
+    :param int world_size: Total number of devices used to host the wrapped module.
+    :param int tensor_parallel_size: Number of devices in each tensor parallel
+        group.
+    :param int pipeline_parallel_size: Number of devices in the pipeline parallel
+        group.
+    :param int data_parallel_size: Number of devices in each data parallel group.
+
+    :raises AssertionError: If the world size is inconsistent with the tp, pp
+        and dp sizes.
+    """
     assert (
         world_size == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
     )
@@ -87,18 +86,36 @@ def initialize_distributed_backend(
     _expose_distributed_backend(backend)
 
 
-def distributed_backend_is_initialized():
+def distributed_backend_is_initialized() -> bool:
+    """Check if the distributed backend has been selected and enabled.
+
+    :returns: True if the backend is enabled.
+    """
     global _ACTIVE_BACKEND
     return _ACTIVE_BACKEND is not None
 
 
-def destroy_distributed_backend():
+def destroy_distributed_backend() -> None:
+    """Disable and delete the active distributed backend.
+    """
     global _ACTIVE_BACKEND
     _ACTIVE_BACKEND = None
 
 
-def _parse_backend():
-    """Figure out what distributed backend to use given current distributed state."""
+def _parse_backend() -> Type[DistributedBackend]:
+    """Parse the runtime distributed state and determine the backend to use.
+
+    Both Pytorch and huggingface use similar distributed backends, where
+    huggingface accelerate is a light wrapper over Pytorch distributed. To
+    figure out which backend is used, we can probe out various environment
+    and/or state variables.
+
+    :returns: The corresponding `DistributedBackend` class to be instantiated.
+    :rtype: Type[DistributedBackend]
+
+    :raises NotImplementedError: Unknown and unsupported distributed backend
+        found.
+    """
     global _SUPPORTED_BACKENDS
 
     ps = PartialState()

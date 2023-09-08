@@ -5,3 +5,4 @@ torch
 transformers
 fairscale
 black
+sphinx-rtd-theme

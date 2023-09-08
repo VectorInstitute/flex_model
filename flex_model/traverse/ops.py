@@ -27,6 +27,21 @@ from .nodes import (
 def flatten(
     root_obj: Any,
 ) -> Tuple[Union[InternalNode, LeafNode, ScalarNode], List[Optional[Tensor]]]:
+    """Flatten an arbitrary python object into a tree definition and a
+    collection of leaves. These can then be repacked by :code:`unflatten` to
+    perfectly reconstruct the original python object. The python object is
+    recursively unpacked using node representations, which each locally know
+    how to unpack themselves.
+
+    :note: The traversal is done in a depth-first way to bias us towards
+        finding the left-most leaf node first.
+
+    :param Any root_obj: The python object to flatten.
+
+    :returns: A tree definition of the python object and a list of leaf
+        objects (typically Pytorch tensors).
+    :rtype: Tuple[Union[InternalNode, LeafNode, ScalarNode], List[Optional[Tensor]]]
+    """
     order = []
     leaves = []
 
@@ -70,6 +85,18 @@ def flatten(
 def unflatten(
     root_node: Union[InternalNode, LeafNode, ScalarNode], leaves: List[Optional[Tensor]]
 ) -> Any:
+    """Repack a tree definition and list of leaves into the original python
+    object.
+
+    :param root_node: Root node which defines the tree definition of the python
+        object.
+    :type root_node: Union[InternalNode, LeafNode, ScalarNode], leaves: List[Optional[Tensor]]
+    :param leaves: List of leaf nodes.
+    :type leaves: List[Optional[Tensor]]
+
+    :returns: The reconstructed python objects.
+    :rtype: Any
+    """
     leaves = list(reversed(leaves))
 
     def _dfs(node):

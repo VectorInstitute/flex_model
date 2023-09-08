@@ -1,5 +1,5 @@
 import logging
-from typing import List, Tuple, Callable, Optional
+from typing import List, Tuple, Callable, Optional, Any
 
 import torch
 from torch import Tensor
@@ -11,11 +11,25 @@ logger = logging.getLogger(__name__)
 
 
 def unity(tensor: Tensor) -> Tensor:
+    """No-op function.
+
+    :param Tensor tensor: Activation tensor.
+
+    :returns: Input tensor unmodified.
+    :rtype: Tensor
+    """
     logger.debug(f"Unity | IN:   {tensor.shape}")
     return tensor
 
 
 def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
+    """Send a copy of the tensor to all members of the tensor parallel group.
+
+    :param Tensor tensor: Tensor to broadcast.
+
+    :returns: All tensor parallel ranks will get the same tensor.
+    :rtype: Tensor
+    """
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
     tp_group = dist.get_activation_tensor_parallel_group()
 
@@ -35,6 +49,13 @@ def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
 
 
 def broadcast_data_parallel(tensor: Tensor) -> Tensor:
+    """Send a copy of the data to all members of the data parallel group.
+
+    :param Tensor tensor: Tensor to broadcast.
+
+    :returns: All data parallel ranks will get the same tensor.
+    :rtype: Tensor
+    """
     if not dist.in_data_parallel_group():
         return tensor
 
@@ -57,6 +78,20 @@ def broadcast_data_parallel(tensor: Tensor) -> Tensor:
 
 
 def all_gather_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
+    """Gather all tensors from tensor parallel group to each device in group.
+
+    Each device in the tensor parallel group has a tensor, and every tensor
+    will be sent to all other members of the tensor parallel group. For
+    example, if gpu0 has T0 and gpu1 has T1, then after this operation gpu0
+    will have [T0, T1] and gpu1 will also have [T0, T1]. A concatenation is
+    done after the communication to generate a single tensor.
+
+    :param Tensor tensor: Tensor to all-gather.
+    :param int dim: Dimension to concatenate the gathered tensors along.
+
+    :returns: The gathered and concatenated tensor.
+    :rtype: Tensor
+    """
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
     tp_rank = dist.get_activation_tensor_parallel_rank()
     tp_group = dist.get_activation_tensor_parallel_group()
@@ -81,6 +116,20 @@ def all_gather_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
 
 
 def all_gather_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
+    """Gather all tensors from data parallel group to each device in group.
+
+    Each device in the data parallel group has a tensor, and every tensor
+    will be sent to all other members of the data parallel group. For
+    example, if gpu0 has T0 and gpu1 has T1, then after this operation gpu0
+    will have [T0, T1] and gpu1 will also have [T0, T1]. A concatenation is
+    done after the communication to generate a single tensor.
+
+    :param Tensor tensor: Tensor to all-gather.
+    :param int dim: Dimension to concatenate the gathered tensors along.
+
+    :returns: The gathered and concatenated tensor.
+    :rtype: Tensor
+    """
     if not dist.in_data_parallel_group():
         return tensor
 
@@ -107,7 +156,8 @@ def all_gather_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
     return output_tensor
 
 
-def all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
+def _all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
+    """Unused."""
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
     tp_rank = dist.get_activation_tensor_parallel_rank()
     tp_group = dist.get_activation_tensor_parallel_group()
@@ -126,7 +176,22 @@ def all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
     return tensor
 
 
-def scatter_tensor_parallel(tensor: Tensor, dim: int = -1):
+def scatter_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
+    """Chunk a tensor and send chunks to corresponding tensor parallel ranks.
+
+    Given a tensor, chunk it along a specific dimension. Each device rank will
+    get the corresponding tensor chunk. For example, T = [T0, T1], where gpu0
+    will get T0 and gpu1 will get T1. Notably, the scatter functions are always
+    used after all-gather functions. Hence each rank has a full copy of the
+    tensor T, so each rank instead discards all chunks besides their own
+    corresponding chunk.
+
+    :param Tensor tensor: Tensor to scatter.
+    :param int dim: Dimension to chunk the tensor along.
+
+    :returns: The corresponding chunk of the full tensor.
+    :rtype: Tensor
+    """
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
     tp_rank = dist.get_activation_tensor_parallel_rank()
 
@@ -140,7 +205,22 @@ def scatter_tensor_parallel(tensor: Tensor, dim: int = -1):
     return output_tensor
 
 
-def scatter_data_parallel(tensor: Tensor, dim: int = 0):
+def scatter_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
+    """Chunk a tensor and send chunks to corresponding data parallel ranks.
+
+    Given a tensor, chunk it along a specific dimension. Each device rank will
+    get the corresponding tensor chunk. For example, T = [T0, T1], where gpu0
+    will get T0 and gpu1 will get T1. Notably, the scatter functions are always
+    used after all-gather functions. Hence each rank has a full copy of the
+    tensor T, so each rank instead discards all chunks besides their own
+    corresponding chunk.
+
+    :param Tensor tensor: Tensor to scatter.
+    :param int dim: Dimension to chunk the tensor along.
+
+    :returns: The corresponding chunk of the full tensor.
+    :rtype: Tensor
+    """
     if not dist.in_data_parallel_group():
         return tensor
 
@@ -157,7 +237,17 @@ def scatter_data_parallel(tensor: Tensor, dim: int = 0):
     return output_tensor
 
 
-def gather_pipeline_parallel(objects):
+def gather_pipeline_parallel(objects: Any) -> Any:
+    """Gather an object from non-zero ranks to rank0 in the pipeline group.
+
+    Takes a pickle-able collection of python objects and tensors and sends
+    them to rank0 in the pipeline parallel group.
+
+    :param Any objects: Some python object that can be pickled. May contain tensors.
+
+    :returns: A collection of the objects sent from all pipeline paralel group ranks.
+    :rtype: Any
+    """
     if not dist.in_pipeline_parallel_group():
         return objects
 
