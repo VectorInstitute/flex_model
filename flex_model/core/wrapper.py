@@ -44,6 +44,10 @@ class FlexModel(nn.Module):
         * Distributed orchestration of 1-D to 3-D parallelisms.
         * Providing convenience functions for various attributes.
 
+    :note: :code:`output_dict` is populated in-place. So running a subsequent
+        forward pass with the same hooks in will delete the previous
+        activations.
+
     :var nn.Module module: The wrapped Pytorch :code:`nn.Module` to hook into.
     :var hook_functions: Collection of :class:`HookFunction` instances keyed by
         the module name to hook into.
