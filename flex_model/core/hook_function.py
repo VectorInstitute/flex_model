@@ -225,7 +225,7 @@ class HookFunction:
             _treedef,
             _leaves,
             _edited_tensor,
-        ) -> Union[LayerOutputs]:
+        ) -> LayerOutputs:
             """Pack activation tensor back into layer output container."""
             layer_outputs = unflatten(_treedef, [_edited_tensor] + _leaves)
             return layer_outputs
