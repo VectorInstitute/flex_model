@@ -5,7 +5,6 @@ from typing import Dict
 from argparse import Namespace
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from functools import partial
-from tests.registry import register_test
 
 
 # could be any MLP layer and the code won't break. The test doesn't generalize
@@ -80,7 +79,6 @@ def make_model_and_tokenizer():
     return model, tokenizer
 
 
-@register_test
 def test_hook_function():
     """
     Tests if HookFunction implements a forward hook correctly

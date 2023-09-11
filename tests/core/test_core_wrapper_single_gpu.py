@@ -1,11 +1,8 @@
 from flex_model.core import FlexModel, HookFunction
 import torch
 import torch.nn as nn
-from typing import Dict
 from argparse import Namespace
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from functools import partial
-from tests.registry import register_test
 
 
 MODULE_NAME_1 = "model.layers.27.mlp"
@@ -43,7 +40,6 @@ def make_model():
     return model
 
 
-@register_test
 def test_register_hook_function():
     """
     Tests if a hook function is registered correctly, and if the fields are set
@@ -71,7 +67,6 @@ def test_register_hook_function():
     assert model.hook_functions[MODULE_NAME_1] is my_hook_function
 
 
-@register_test
 def test_register_trainable_module():
     """
     Tests if a trainable module is registered correctly, and that all hook
@@ -107,7 +102,6 @@ def test_register_trainable_module():
     assert my_hook_function_2.modules["test"] is trainable_module
 
 
-@register_test
 def test_wrapped_module_requires_grad():
     """
     Test whether all parameters in the wrapped module do/don't require grad
@@ -137,7 +131,6 @@ def test_wrapped_module_requires_grad():
             assert p.requires_grad is True
 
 
-@register_test
 def test_trainable_modules_requires_grad():
     """
     Test to ensure *only* the added trainable module is affected by upon
@@ -175,7 +168,6 @@ def test_trainable_modules_requires_grad():
         assert p.requires_grad is True
 
 
-@register_test
 def test_destroy():
     """
     Tests the destroy method to ensure everything is cleared appropriately.
