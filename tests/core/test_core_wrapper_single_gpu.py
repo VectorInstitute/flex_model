@@ -192,7 +192,6 @@ def test_destroy():
 
     model.register_hook_function(my_hook_function)
     model.destroy()
-    breakpoint()
 
     assert model.hook_functions == {}
     assert model._hook_function_handles == {}
