@@ -1,4 +1,5 @@
 from argparse import Namespace
+from dataclass import dataclass
 import logging
 from typing import (
     List,
@@ -92,6 +93,15 @@ def default_editing_function(
     return inputs
 
 
+_PYTORCH_HOOK_TYPE = {
+    "forward": "register_forward_hook",
+    "backward": "register_full_backward_hook",
+    "tensor_backward": "register_hook",
+    "pre_forward": "register_forward_pre_hook",
+    "pre_backward": "register_full_backward_pre_hook",
+}
+
+
 class HookFunction:
     """Function which retrieves/edits activations in a Pytorch `nn.Module`.
 
@@ -159,6 +169,7 @@ class HookFunction:
         module_name: str,
         expected_shape: Tuple[Optional[int], ...],
         editing_function: Optional[Callable] = None,
+        hook_type: str = "forward",
     ) -> None:
         """Initializes the instance by wrapping the :code:`editing_function`.
 
@@ -169,6 +180,8 @@ class HookFunction:
         :param editing_function: Function which edits the activation
             tensor.
         :type editing_function: Optional[Callable]
+        :param str hook_type: Type of hook to register, eg. forward, backward,
+            etc.
         """
         self.module_name = module_name
         self.expected_shape = expected_shape
@@ -177,6 +190,10 @@ class HookFunction:
             self.editing_function = default_editing_function
         else:
             self.editing_function = editing_function
+
+        assert hook_type in _PYTORCH_HOOK_MAP
+        self.hook_type = hook_type
+        self._hook_registry_function = _PYTORCH_HOOK_MAP[self.hook_type]
 
         self._collect: Optional[Callable] = None
         self._disperse: Optional[Callable] = None
@@ -267,41 +284,110 @@ class HookFunction:
             self._default_bind_tensor_to_cpu_output,
         )
 
-    def _hook_function_template(
+    def _dispatch_hook_function(
         self,
-        module: nn.Module,
-        inputs: Union[LayerOutputs, Tensor],
-        outputs: Union[LayerOutputs, Tensor],
+        *args,
+        **kwargs
     ) -> Union[LayerOutputs, Tensor]:
-        """Hook function implementation called by Pytorch after registration.
+        """Dispatches the correct handling function depending on the hook type.
 
-        Template function which contains the implementation of the hook
-        function. See the :class:`HookFunction` docstring for details.
+        There are many different types of Pytorch hooks with varying function
+        signatures. This function unpacks the Pytorch hook function input
+        arguments depending on the hook type and dispatches the corresponding
+        handling function.
 
-        :param nn.Module module: Current hooked module.
-        :param inputs: Input to the current module.
-        :type inputs: Union[LayerOutputs, Tensor]
-        :param outputs: Output of the current module.
-        :type outputs: Union[LayerOutputs, Tensor]
+        :note: The unpacking here is in constrast to the unpacking of layer
+            outputs, which is done in the next step if needed.
 
         :returns: Potentially edited layer outputs.
             These outputs are sent as input to the next layer.
         :rtype: Union[LayerOutputs, Tensor]
 
-        :raise AssertionError: Start activation tensor shape is not the same as
-            the ending activation tensor shape.
+        :raise NotImplementedError: The requested hook type isn't yet
+            supported.
         """
         logger.debug(f"*{self.module_name}: Hook function activated*")
 
-        # Separate local activation tensor from rest of layer outputs.
-        tensor, _repack_layer_outputs = self._unpack_layer_outputs(
-            outputs,
-        )
-        # Debugging
+        # Dispatch depending on hook type.
+        if self.hook_type == "forward":
+            assert len(kwargs) == 0
+            module, inputs, outputs = args
+            retval = self._handle_forward(module, inputs, outputs)
+
+        elif self.hook_type == "backward":
+            module, grad_inputs, grad_outputs = args
+            retval = self._handle_backward(module, grad_inputs, grad_outputs)
+
+        elif self.hook_type == "tensor_backward":
+            grad = args
+            retval = self._handle_tensor_backward(grad)
+
+        elif self.hook_type == "pre_forward":
+            module, args = args[0], args[1:]
+            retval = self._handle_pre_forward(module, args)
+
+        elif self.hook_type == "pre_backward":
+            module, grad_output = args[0], args[1:]
+            retval = self._handle_pre_backward(module, grad_output)
+
+        else:
+            raise NotImplementedError(f"Hook type: {self.hook_type} not "
+                                      f" supported.")
+        return retval
+
+    def _handle_forward(
+        self,
+        module: nn.Module,
+        _inputs: Union[LayerOutputs, Tensor],
+        outputs: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Runs a hook function for editing forward module outputs."""
+        outputs = self._template_for_input_output_editing(module, outputs)
+        return outputs
+
+    def _handle_backward(
+        self,
+        module: nn.Module,
+        grad_inputs: Union[LayerOutputs, Tensor],
+        _grad_outputs: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Runs a hook function for editing backward module input gradients."""
+        outputs = self._template_for_input_output_editing(module, grad_inputs)
+        return outputs
+
+    def _handle_pre_forward(
+        self,
+        module: nn.Module,
+        args: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Runs a hook function for editing forward module inputs."""
+        # Same procedure as `_handle_forward`, just that we operate on args.
+        outputs = self._template_for_input_output_editing(module, args)
+        return outputs
+
+    def _handle_pre_backward(
+        self,
+        module: nn.Module,
+        grad_outputs: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Runs a hook function for editing backward module output gradients."""
+        outputs = self._template_for_input_output_editing(module, grad_outputs)
+        return outputs
+
+    def _handle_tensor_backward(
+        self,
+        grad: Tensor,
+    ) -> Tensor:
+        """Runs a hook function for editing tensor gradients."""
+        outputs = self._template_for_point_tensor_editing(grad)
+        return outputs
+
+    def _template_for_point_tensor_editing(self, tensor: Tensor) -> Tensor:
+        """Template function for editing a sharded activation tensor."""
         start_shape = tensor.shape
 
         # Poplate the collection and dispersion functions.
-        if self._collect is None and self._disperse is None:
+        if self._collect is None or self._disperse is None:
             self._parse_tensor(tensor)
 
         # Collect the activation tensor across workers.
@@ -322,33 +408,56 @@ class HookFunction:
         tensor = self._disperse(tensor)
         end_shape = tensor.shape
 
-        # Repack the local activation tensor back into the rest of the layer
-        # outputs.
-        outputs = _repack_layer_outputs(tensor)
-
         assert start_shape == end_shape
 
-        return outputs
+
+    def _template_for_input_output_editing(
+        self,
+        module: nn.Module,
+        inputs_or_outputs: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Template function for editing layer input or output activation tensors.
+
+        Given arbitary layer outputs, this function does unpacking of layer
+        outputs and repacking of the potentially edited layer outputs.
+
+        :param nn.Module module: Module which was hooked into.
+        :param inputs_or_outputs: Layer inputs or outputs, depending on if
+            it's hooked into a backward or forward hook respectively.
+        :type inputs_or_outputs: Union[LayerOutputs, Tensor]
+
+        :returns: The edited layer outputs.
+        :rtype: Union[LayerOutputs, Tensor]
+        """
+        # Separate local activation tensor from rest of layer outputs.
+        tensor, _repack_layer_outputs = self._unpack_layer_outputs(
+            inputs_or_outputs)
+
+        # Run editing logic on activation tensor.
+        tensor = self._template_for_point_tensor_editing(tensor)
+        
+        # Repack the local activation tensor back into the rest of the layer
+        # outputs.
+        edited_inputs_or_outputs = _repack_layer_outputs(tensor)
+
+        return edited_inputs_or_outputs
+
 
     def __call__(
         self,
-        module: nn.Module,
-        inputs: Union[LayerOutputs, Tensor],
-        outputs: Union[LayerOutputs, Tensor],
+        *args,
+        **kwargs,
     ) -> LayerOutputs:
-        """Entrypoint to forward hook implementation.
+        """Entrypoint called by Pytorch hook logic.
 
         Allows us to bind the entire :class:`HookFunction` to an :code:`nn.Module`
         using Pytorch hook registration.
 
-        :param nn.Module module: Hooked submodule.
-        :param inputs: Hooked submodule inputs.
-        :type inputs: Union[LayerOutputs, Tensor]
-        :param outputs: Hooked submodule outputs.
-        :type outputs: Union[LayerOutputs, Tensor]
-
-        :note: Inputs do not matter since hooks are run after the submodule has
-            completed its forward pass.
+        :note: Doesn't currently support accepting keyword argments passed into
+            :code:`nn.Module`s.
         """
-        outputs = self._hook_function_template(module, inputs, outputs)
+        if len(kwargs) != 0:
+            raise NotImplementedError("HookFunction doesn't support kwargs.")
+
+        outputs = self._dispatch_hook_function(args)
         return outputs

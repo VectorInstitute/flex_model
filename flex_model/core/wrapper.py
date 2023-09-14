@@ -199,9 +199,18 @@ class FlexModel(nn.Module):
                         f"be found in the wrapped model."
                     )
 
-                handle = submod.register_forward_hook(
-                    hook_function,
+                hook_registry_function = hook_function._hook_registry_function
+                module_hook_registry_function = getattr(
+                    submod,
+                    hook_registry_function,
+                    None,
                 )
+                assert module_hook_registry_function is not None, (
+                    f"Module can't find hook registry function: "
+                    f"{hook_registry_function}"
+                )
+                handle = module_hook_registry_function(hook_function)
+
                 self._hook_function_handles[module_name] = handle
                 logger.debug(
                     f"Intalling hook function on module {module_name}"
