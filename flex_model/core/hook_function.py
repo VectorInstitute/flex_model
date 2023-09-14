@@ -1,5 +1,4 @@
 from argparse import Namespace
-from dataclass import dataclass
 import logging
 from typing import (
     List,
@@ -93,7 +92,8 @@ def default_editing_function(
     return inputs
 
 
-_PYTORCH_HOOK_TYPE = {
+# Map: hook type -> nn.Module hook registry function.
+_PYTORCH_HOOK_MAP = {
     "forward": "register_forward_hook",
     "backward": "register_full_backward_hook",
     "tensor_backward": "register_hook",
@@ -163,7 +163,6 @@ class HookFunction:
             editing_function=my_editing_function,
         )
     """
-
     def __init__(
         self,
         module_name: str,
@@ -191,7 +190,9 @@ class HookFunction:
         else:
             self.editing_function = editing_function
 
-        assert hook_type in _PYTORCH_HOOK_MAP
+        assert hook_type in _PYTORCH_HOOK_MAP, (
+            f"Couldn't find hook type: {hook_type}"
+        )
         self.hook_type = hook_type
         self._hook_registry_function = _PYTORCH_HOOK_MAP[self.hook_type]
 
@@ -234,7 +235,6 @@ class HookFunction:
         # TODO: Current behaviour is always taking the first leaf as the
         #       activation tensor. But this should be exposed as configurable
         #       to the user.
-
         tensor, other_leaves = leaves[0], leaves[1:]
         assert tensor is not None
 
