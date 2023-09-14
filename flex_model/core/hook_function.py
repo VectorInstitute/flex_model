@@ -268,7 +268,7 @@ class HookFunction:
         """Runs parsers for collection/dispersion, editing and dumping.
 
         Populates the :code:`_collect`, :code:`_disperse`, :code:`_edit` and
-        :code:`_dump` functions during runtime. The results of which depend on:
+        :cod:`_dump` functions during runtime. The results of which depend on:
             1. The distributed device mesh
             2. The shape of the (potentially sharded) activation tensor
             3. The expected shape of the full activation tensor.
@@ -286,8 +286,7 @@ class HookFunction:
 
     def _dispatch_hook_function(
         self,
-        *args,
-        **kwargs
+        hook_function_args: Tuple[Any, ...],
     ) -> Union[LayerOutputs, Tensor]:
         """Dispatches the correct handling function depending on the hook type.
 
@@ -306,28 +305,29 @@ class HookFunction:
         :raise NotImplementedError: The requested hook type isn't yet
             supported.
         """
+        # TODO: Change hook granularity
         logger.debug(f"*{self.module_name}: Hook function activated*")
 
         # Dispatch depending on hook type.
         if self.hook_type == "forward":
-            assert len(kwargs) == 0
-            module, inputs, outputs = args
+            module, inputs, outputs = hook_function_args
             retval = self._handle_forward(module, inputs, outputs)
 
+        # TODO: Recursive module parameter unsharding
         elif self.hook_type == "backward":
-            module, grad_inputs, grad_outputs = args
+            module, grad_inputs, grad_outputs = hook_function_args
             retval = self._handle_backward(module, grad_inputs, grad_outputs)
 
         elif self.hook_type == "tensor_backward":
-            grad = args
+            grad = hook_function_args
             retval = self._handle_tensor_backward(grad)
 
         elif self.hook_type == "pre_forward":
-            module, args = args[0], args[1:]
+            module, args = hook_function_args[0], hook_function_args[1:]
             retval = self._handle_pre_forward(module, args)
 
         elif self.hook_type == "pre_backward":
-            module, grad_output = args[0], args[1:]
+            module, grad_output = hook_function_args[0], hook_function_args[1:]
             retval = self._handle_pre_backward(module, grad_output)
 
         else:
@@ -379,10 +379,15 @@ class HookFunction:
         grad: Tensor,
     ) -> Tensor:
         """Runs a hook function for editing tensor gradients."""
-        outputs = self._template_for_point_tensor_editing(grad)
+        # No module since this is tensor-level.
+        outputs = self._template_for_point_tensor_editing(None, grad)
         return outputs
 
-    def _template_for_point_tensor_editing(self, tensor: Tensor) -> Tensor:
+    def _template_for_point_tensor_editing(
+        self,
+        module: nn.Module,
+        tensor: Tensor,
+    ) -> Tensor:
         """Template function for editing a sharded activation tensor."""
         start_shape = tensor.shape
 
@@ -434,7 +439,7 @@ class HookFunction:
             inputs_or_outputs)
 
         # Run editing logic on activation tensor.
-        tensor = self._template_for_point_tensor_editing(tensor)
+        tensor = self._template_for_point_tensor_editing(module, tensor)
         
         # Repack the local activation tensor back into the rest of the layer
         # outputs.
