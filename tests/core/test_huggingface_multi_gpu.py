@@ -7,7 +7,6 @@ from accelerate import Accelerator
 from flex_model.core import FlexModel, HookFunction
 import flex_model.distributed as dist
 from flex_model.utils import setup_logger
-from tests.registry import register_test
 from tests.test_utilities import Utils, make_model_and_tokenizer
 
 
@@ -95,8 +94,7 @@ LLAMA_MODULES_FSDP = {
 }
 
 
-@register_test
-def test_huggingface_llama():
+def test_huggingface_llama(hook_type: str = "forward"):
     """
     Make sure an accelerate-FSDP model gives the same output as a model
     running on one gpu. The single-gpu model will process one batch at a time.
@@ -131,7 +129,13 @@ def test_huggingface_llama():
         data_parallel_size=accelerator.num_processes,
     )
     for module_name, expected_shape in LLAMA_MODULES_FSDP.items():
-        flex_model.register_hook_function(HookFunction(module_name, expected_shape))
+        flex_model.register_hook_function(
+            HookFunction(
+                module_name,
+                expected_shape,
+                hook_type=hook_type,
+            )
+        )
 
     chunked_inputs = inputs.chunk(accelerator.num_processes, dim=0)
 
@@ -158,7 +162,13 @@ def test_huggingface_llama():
     flex_model = FlexModel(model, single_gpu_activations)
 
     for module_name, expected_shape in LLAMA_MODULES.items():
-        flex_model.register_hook_function(HookFunction(module_name, expected_shape))
+        flex_model.register_hook_function(
+            HookFunction(
+                module_name, 
+                expected_shape,
+                hook_type=hook_type,
+            )
+        )
 
     for chunk in chunked_inputs:
         _ = flex_model(chunked_inputs[0])
@@ -177,4 +187,4 @@ def test_huggingface_llama():
         )
 
 
-test_huggingface_llama()
+test_huggingface_llama(hook_type="forward")

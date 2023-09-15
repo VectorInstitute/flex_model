@@ -415,6 +415,7 @@ class HookFunction:
 
         assert start_shape == end_shape
 
+        return tensor
 
     def _template_for_input_output_editing(
         self,

@@ -106,6 +106,7 @@ def parse_collect_from_parameter_tensor(
         return dist.unity
 
     tp_world_size = dist.get_activation_tensor_parallel_world_size()
+    dp_world_size = dist.get_activation_data_parallel_world_size()
 
     # Handle unspecifed dimensions
     expected_shape = _autofill_expected_shape(tensor, expected_shape)
@@ -113,22 +114,30 @@ def parse_collect_from_parameter_tensor(
     # Validate tensor sharding scheme
     tensor_numel = tensor.numel()
     expected_numel = reduce(lambda x, y: x * y, expected_shape)
-    assert tensor_numel in [
-        expected_numel // tp_world_size,  # Evenly sharded across TP
-        expected_numel,  # Full-rank
-    ], (
+
+    # NOTE: DP sharding support is supposed to be for FSDP, but unused right
+    #       now.
+    # Both parameter and grad tensors can be sharded arbitraryily in the TP
+    # and DP dimensions. The valid cases are:
+    # 1. Unsharded
+    # 2. Sharded along TP axis.
+    # 3. Sharded along DP axis.
+    # 4. Sharded along TP and DP axis.
+    valid_sharding_schemes = [
+        expected_numel,
+        expected_numel // tp_world_size,
+        expected_numel // dp_world_size,
+        expected_numel // (tp_world_size * dp_world_size),
+    ]
+
+    assert tensor_numel in valid_sharding_schemes, (
         f"Imperfect activation sharding: Given {tensor_numel} expected "
         f"{expected_numel}"
     )
 
-    # Single gpu fallback
-    if tp_world_size == 1:
-        return dist.unity
-
     sharded_dim = _get_different_dim(tensor.shape, expected_shape)
 
-    # Model is sharded TP, but current layer is not
-    if sharded_dim == -1:
+    if tp_world_size == 1 or sharded_dim == -1:
         return dist.unity
 
     return lambda t: dist.all_gather_tensor_parallel(t, dim=sharded_dim)
