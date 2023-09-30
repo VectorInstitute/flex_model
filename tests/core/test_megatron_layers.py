@@ -64,10 +64,6 @@ def test_backward_hooks_megatron():
     )
     print(model)
     hook_functions = {
-        #"vocab_parallel_embedding": (None, None, hidden_dim),
-        #"vocab_embedding": (None, None, None),
-        #"parallel_embedding": (None, None, hidden_dim),
-        #"embedding": (None, None, None),
         "column_parallel_linear": (None, None, hidden_dim),
         "col_linear": (None, None, None),
         "row_parallel_linear": (None, None, hidden_dim), # Input tensor grads are sharded.

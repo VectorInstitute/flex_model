@@ -205,6 +205,14 @@ class HookFunction:
         self.save_ctx: Optional[Namespace] = None
         self.modules: Optional[nn.ModuleDict] = None
 
+        self._hook_type_to_handle_map = {
+            "forward": self._handle_forward,
+            "backward": self._handle_backward,
+            "tensor_backward": self._handle_tensor_backward,
+            "pre_forward": self._handle_pre_forward,
+            "pre_backward": self._handle_pre_backward,
+        }
+
     def _unpack_layer_outputs(
         self,
         outputs: Union[LayerOutputs, Tensor],
@@ -268,7 +276,7 @@ class HookFunction:
         """Runs parsers for collection/dispersion, editing and dumping.
 
         Populates the :code:`_collect`, :code:`_disperse`, :code:`_edit` and
-        :cod:`_dump` functions during runtime. The results of which depend on:
+        :code:`_dump` functions during runtime. The results of which depend on:
             1. The distributed device mesh
             2. The shape of the (potentially sharded) activation tensor
             3. The expected shape of the full activation tensor.
@@ -308,31 +316,9 @@ class HookFunction:
         # TODO: Change hook granularity
         logger.debug(f"*{self.module_name}: Hook function activated*")
 
-        # Dispatch depending on hook type.
-        if self.hook_type == "forward":
-            module, inputs, outputs = hook_function_args
-            retval = self._handle_forward(module, inputs, outputs)
+        handle_fn = self._hook_type_to_handle_map[self.hook_type]
+        retval = handle_fn(*hook_function_args)
 
-        # TODO: Recursive module parameter unsharding
-        elif self.hook_type == "backward":
-            module, grad_inputs, grad_outputs = hook_function_args
-            retval = self._handle_backward(module, grad_inputs, grad_outputs)
-
-        elif self.hook_type == "tensor_backward":
-            grad = hook_function_args
-            retval = self._handle_tensor_backward(grad)
-
-        elif self.hook_type == "pre_forward":
-            module, args = hook_function_args[0], hook_function_args[1:]
-            retval = self._handle_pre_forward(module, args)
-
-        elif self.hook_type == "pre_backward":
-            module, grad_output = hook_function_args[0], hook_function_args[1:]
-            retval = self._handle_pre_backward(module, grad_output)
-
-        else:
-            raise NotImplementedError(f"Hook type: {self.hook_type} not "
-                                      f" supported.")
         return retval
 
     def _handle_forward(
@@ -413,7 +399,11 @@ class HookFunction:
         tensor = self._disperse(tensor)
         end_shape = tensor.shape
 
-        assert start_shape == end_shape
+        assert start_shape == end_shape, (
+            f"Input tensor and output tensor shape mismatch: {start_shape} -> "
+            f"{end_shape}. The tensor returned by the editing function must "
+            f"not change in shape at the output."
+        )
 
         return tensor
 
