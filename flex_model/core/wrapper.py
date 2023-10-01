@@ -16,6 +16,7 @@ from typing import (
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 import flex_model.distributed as dist
 from flex_model.traverse import (
@@ -161,6 +162,12 @@ class FlexModel(nn.Module):
         :param HookFunction hook_function: User-defined :class:`HookFunction` instance
             to register.
         """
+        if isinstance(self.module, FSDP) and hook_function.hook_type == "tensor_backward":
+            raise NotImplementedError(
+                "Pytorch FSDP is currently not supported for parameter/grad "
+                "level hooks yet."
+            )
+
         hook_function._output_ptr = self.output_ptr
         hook_function.save_ctx = self.save_ctx
         hook_function.modules = self.trainable_modules
@@ -199,9 +206,18 @@ class FlexModel(nn.Module):
                         f"be found in the wrapped model."
                     )
 
-                handle = submod.register_forward_hook(
-                    hook_function,
+                hook_registry_function = hook_function._hook_registry_function
+                module_hook_registry_function = getattr(
+                    submod,
+                    hook_registry_function,
+                    None,
                 )
+                assert module_hook_registry_function is not None, (
+                    f"Module can't find hook registry function: "
+                    f"{hook_registry_function}"
+                )
+                handle = module_hook_registry_function(hook_function)
+
                 self._hook_function_handles[module_name] = handle
                 logger.debug(
                     f"Intalling hook function on module {module_name}"
@@ -265,6 +281,14 @@ class FlexModel(nn.Module):
             the computation graph and on CPU.
         :rtype: Tensor
         """
+        # Need to specially handle cases where parameters/gradients are sharded
+        # in complex ways.
+        if isinstance(self.module, FSDP):
+            raise NotImplementedError(
+                "Pytorch FSDP is currently not supported for parameter "
+                "retrieval yet."
+            )
+
         local_param = self.module.get_parameter(parameter_name).detach()
         collect_fn = dist.parse_collect_from_parameter_tensor(
             local_param,
