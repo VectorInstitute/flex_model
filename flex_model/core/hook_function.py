@@ -185,6 +185,9 @@ class HookFunction:
         self.module_name = module_name
         self.expected_shape = expected_shape
 
+        # TODO (mchoi): If editing function not passed (ie. just doing
+        #               retrieval), then we can fire async collectives instead
+        #               since there's no data dependency.
         if editing_function is None:
             self.editing_function = default_editing_function
         else:
@@ -374,7 +377,11 @@ class HookFunction:
         module: nn.Module,
         tensor: Tensor,
     ) -> Tensor:
-        """Template function for editing a sharded activation tensor."""
+        """Template function for editing a sharded activation tensor.
+
+        This function is used alone in cases where hook functions operate
+        directly on a tensor, and not an entire module.
+        """
         start_shape = tensor.shape
 
         # Poplate the collection and dispersion functions.
