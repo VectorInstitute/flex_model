@@ -71,6 +71,7 @@ def main(args):
     ]
     for hf in hook_functions:
         flex_model.register_hook_function(hf)
+    flex_model.enable_forward_hooks()
 
     start_t = time.time()
     for i in range(args.steps):
