@@ -309,15 +309,15 @@ class FlexModel(nn.Module):
             and dist.in_pipeline_parallel_group()
             and dist.get_activation_pipeline_parallel_world_size() > 1
         ):
-            gathered_acts = dist.gather_pipeline_parallel(self.output_ptr)
-            if gathered_acts is not None:
-                self.output_ptr = {
-                    layer_name: act
-                    for act_dict in gathered_acts
-                    for layer_name, act in act_dict.items()
-                }
+            gathered_acts = dist.gather_pipeline_parallel_tensor_dicts(
+                self.output_ptr,
+            )
 
-            # Reset back to empty dict for next forward pass
+            # Rank 0 accumulates the activation tensors.
+            if dist.get_activation_pipeline_parallel_rank() == 0:
+                self.output_ptr.update(gathered_acts)
+
+            # Other ranks reset their collections for the next forward pass.
             else:
                 self.output_ptr = {}
 
