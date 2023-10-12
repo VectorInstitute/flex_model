@@ -435,6 +435,13 @@ def batch_isend_irecv_pipeline_parallel(
     send_tensors: List[Tensor],
     send_to_ranks: List[int],
 ) -> None:
+    """Run batched peer-to-peer communications.
+
+    :param List[Tensor] recv_tensors: Tensors to receive.
+    :param List[int] recv_from_ranks: Ranks to receive from.
+    :param List[Tensor] send_tensors: Tensors to send.
+    :param List[int] send_to_ranks: Ranks to send to.
+    """
     world_size = dist.get_activation_pipeline_parallel_world_size()
     rank = dist.get_activation_pipeline_parallel_rank()
     group = dist.get_activation_pipeline_parallel_group()
