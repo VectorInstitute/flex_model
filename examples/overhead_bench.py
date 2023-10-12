@@ -61,16 +61,17 @@ def main(args):
     )
     hidden_dim = model.layers[0].feed_forward.w1.out_features
     n_layers = model.params.n_layers
-    hook_functions = [
-        HookFunction(
-            f"layers.{i}.feed_forward.w1",
-            expected_shape=(None, None, hidden_dim),
-            editing_function=None,
+    # TODO (mchoi): This is a common pattern, possible to automatically do this
+    #               given a string pattern to match with the layer names, ie.
+    #               `feed_forward`, `mlp`, `self_attn`, etc.
+    for i in range(n_layer):
+        flex_model.register_hook_function(
+            HookFunction(
+                f"layers.{i}.feed_forward.w1",
+                expected_shape=(None, None, hidden_dim),
+                editing_function=None,
+            )
         )
-        for i in range(n_layers)
-    ]
-    for hf in hook_functions:
-        flex_model.register_hook_function(hf)
     flex_model.enable_forward_hooks()
 
     start_t = time.time()
