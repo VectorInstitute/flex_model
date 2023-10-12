@@ -47,7 +47,7 @@ def editing_function(current_module, inputs, save_ctx, modules) -> Tensor
 	edited_activations = modules["mlp"].forward(edited_activations)
 
 	return edited_activations
-	
+
 # Create hook function
 hook_function = HookFunction(
 	module_name="layers.7.feed_forward.w1",
@@ -63,30 +63,17 @@ model.forward(inputs)
 ```
 
 # Running Tests
-Use `torchrun` to run all of the tests requiring distributed. Else you can just
-use `python3`. All distributed tests were done on 2-4 GPUs.
-```
-torchrun --nnodes 1 \
-	--nproc_per_node <2 or 4> \
-	--rdzv_id 6969 \
-	--rdzv_backend c10d \
-	--rdzv_endpoint <gpuXXX> \
-	--test_<name>.py
-```
+## No-GPU tests:
+Currently WIP transferring these to `pytest`.
 
-# Running TunedLens
-Here's an example command to do a training run of TunedLens using the
-FlexModel backend to retrieve weights and activations. The implementation is
-basic and does not do any checkpointing. For full launch options, check out
-the `test_tunedlens.py` script.
+## Distributed tests:
+Use `torchrun` to run all of the tests requiring distributed. All distributed
+tests were done on a maximum of 4 GPUs. The `run_tests.sh` script runs all of
+the necessary tests.
 ```
 torchrun --nnodes 1 \
-	--nproc_per_node 2 \
+	--nproc_per_node 4 \
 	--rdzv_id 6969 \
 	--rdzv_backend c10d \
-	--rdzv_endpoint <gpuXXX> \
-	--test_tunedlens.py \
-	--log_level warning \
-	--batch_size 16 \
-	--num_steps 250
+	run_tests.sh
 ```

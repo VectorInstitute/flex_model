@@ -1,26 +1,26 @@
 from __future__ import annotations
+
+import logging
 from collections import deque
 from dataclasses import dataclass
-import logging
-from typing import Union, Tuple, List, Any, Dict, Callable, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
 
 from .nodes import (
+    InternalNode,
     InternalObject,
-    InternalNode,
-    LeafObject,
     LeafNode,
-    ScalarObject,
+    LeafObject,
     ScalarNode,
-    InternalNode,
-    is_leaf_obj,
-    is_internal_obj,
-    is_leaf_node,
-    is_internal_node,
+    ScalarObject,
     get_internal_node,
     get_leaf_node,
+    is_internal_node,
+    is_internal_obj,
+    is_leaf_node,
+    is_leaf_obj,
 )
 
 

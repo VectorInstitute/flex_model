@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import Union, Tuple, List, Any, Dict, Callable, Optional
+
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
 from transformers.modeling_outputs import BaseModelOutputWithPast
-
 
 # Types which do not have classes
 # TODO: Add high-level type for root node tree definitions
@@ -23,10 +23,11 @@ def register_internal_node_type(internal_node_type: type) -> Callable:
     corresponding :code:`type`.
 
     :param type internal_node_type: The :code:`type` associated with the node.
-    
+
     :returns: Inner function which registers the :class:`InternalNode` child
         class with the :code:`type`.
     """
+
     def _inner(_internal_node_cls: InternalNode) -> InternalNode:
         _INTERNAL_NODE_TYPE_REGISTRY[internal_node_type] = _internal_node_cls
         return _internal_node_cls
@@ -39,7 +40,7 @@ def register_leaf_node_type(leaf_node_type: type) -> Callable:
     corresponding :code:`type`.
 
     :param type internal_node_type: The :code:`type` associated with the node.
-    
+
     :returns: Inner function which registers the :class:`LeafNode` child
         class with the :code:`type`.
     """
@@ -247,6 +248,7 @@ class LeafNode:
 class TensorNode(LeafNode):
     """Leaf node corresponding to a Pytorch tensor.
     """
+
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, TensorNode):
             return False
@@ -262,7 +264,7 @@ def get_internal_node(internal_obj: InternalObject) -> InternalNode:
     :class:`InternalObject`.
 
     :param InternalObject internal_obj: Target object.
-    
+
     :returns: The corresponding node representation.
     :rtype: InternalNode
     """
@@ -274,7 +276,7 @@ def get_leaf_node(leaf_obj: LeafObject) -> LeafNode:
     :class:`LeafObject`.
 
     :param LeafObject leaf_obj: Target object.
-    
+
     :returns: The corresponding node representation.
     :rtype: LeafNode
     """

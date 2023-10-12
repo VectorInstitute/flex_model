@@ -35,8 +35,7 @@ def main(args):
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer_dir,
-        local_files_only=True,
+        args.tokenizer_dir, local_files_only=True,
     )
 
     ## NEW ##

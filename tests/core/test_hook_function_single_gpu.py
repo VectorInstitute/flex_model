@@ -1,11 +1,12 @@
-from flex_model.core import FlexModel, HookFunction
+from argparse import Namespace
+from functools import partial
+from typing import Dict
+
 import torch
 import torch.nn as nn
-from typing import Dict
-from argparse import Namespace
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from functools import partial
 
+from flex_model.core import FlexModel, HookFunction
 
 # could be any MLP layer and the code won't break. The test doesn't generalize
 # to other kinds of layers
@@ -69,8 +70,7 @@ def make_model_and_tokenizer():
         low_cpu_mem_usage=True,
     )
     tokenizer = AutoTokenizer.from_pretrained(
-        "/model-weights/Llama-2-13b-hf/",
-        local_files_only=True,
+        "/model-weights/Llama-2-13b-hf/", local_files_only=True,
     )
     tokenizer.pad_token_id = 0
     tokenizer.padding_side = "right"
@@ -93,11 +93,9 @@ def test_hook_function():
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(
-        prompts,
-        padding="max_length",
-        return_tensors="pt",
-    )["input_ids"].cuda()
+    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt",)[
+        "input_ids"
+    ].cuda()
 
     # first get our ground truth activations
     inject_layer = LayerInjection(MODULE_NAME, model)
@@ -115,10 +113,7 @@ def test_hook_function():
         assert not isinstance(m, LayerInjection)
 
     activations = {}
-    model = FlexModel(
-        model,
-        activations,
-    )
+    model = FlexModel(model, activations,)
 
     my_hook_function = HookFunction(
         MODULE_NAME,

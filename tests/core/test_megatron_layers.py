@@ -5,8 +5,7 @@ import torch.distributed as dist
 
 from flex_model.core import FlexModel, HookFunction
 from flex_model.utils import setup_logger
-from tests.test_utilities import Utils, MegatronLayers
-
+from tests.test_utilities import MegatronLayers, Utils
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +21,7 @@ def test_MegatronLayers():
     batch_size = 4
 
     inputs = torch.randint(
-        low=0,
-        high=vocab_size,
-        size=(batch_size, sequence_length),
+        low=0, high=vocab_size, size=(batch_size, sequence_length),
     ).cuda()
     logger.debug(inputs)
 
@@ -46,9 +43,7 @@ def test_backward_hooks_megatron():
     batch_size = 4
 
     inputs = torch.randint(
-        low=0,
-        high=vocab_size,
-        size=(batch_size, sequence_length),
+        low=0, high=vocab_size, size=(batch_size, sequence_length),
     ).cuda()
     logger.debug(inputs)
 
@@ -66,16 +61,16 @@ def test_backward_hooks_megatron():
     hook_functions = {
         "column_parallel_linear": (None, None, hidden_dim),
         "col_linear": (None, None, None),
-        "row_parallel_linear": (None, None, hidden_dim), # Input tensor grads are sharded.
+        "row_parallel_linear": (
+            None,
+            None,
+            hidden_dim,
+        ),  # Input tensor grads are sharded.
         "row_linear": (None, None, hidden_dim),
     }
     for module_name, expected_shape in hook_functions.items():
         model.register_hook_function(
-            HookFunction(
-                module_name,
-                expected_shape,
-                hook_type="backward",
-            )
+            HookFunction(module_name, expected_shape, hook_type="backward",)
         )
 
     parallel_out, regular_out = model(inputs)
@@ -91,7 +86,7 @@ def test_backward_hooks_megatron():
             output_dict["row_parallel_linear"], output_dict["row_linear"], atol=1e-7
         )
         logger.info("Tests successful.")
-        
+
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
     Utils.destroy_model_parallel()
@@ -108,9 +103,7 @@ def test_forward_hooks_megatron():
     batch_size = 4
 
     inputs = torch.randint(
-        low=0,
-        high=vocab_size,
-        size=(batch_size, sequence_length),
+        low=0, high=vocab_size, size=(batch_size, sequence_length),
     ).cuda()
     logger.debug(inputs)
 
@@ -156,7 +149,7 @@ def test_forward_hooks_megatron():
             output_dict["row_parallel_linear"], output_dict["row_linear"], atol=1e-7
         )
         logger.info("Tests successful.")
-        
+
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
     Utils.destroy_model_parallel()

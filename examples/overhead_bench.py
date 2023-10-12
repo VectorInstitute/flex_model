@@ -8,7 +8,6 @@ from llama import Llama
 from flex_model.core import FlexModel, HookFunction
 from flex_model.utils import setup_logger
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -55,9 +54,7 @@ def main(args):
     # Benchmark inference time with flex model, one hook per layer.
     out_dict = {}
     flex_model = FlexModel(
-        model,
-        out_dict,
-        tensor_parallel_size=torch.distributed.get_world_size(),
+        model, out_dict, tensor_parallel_size=torch.distributed.get_world_size(),
     )
     hidden_dim = model.layers[0].feed_forward.w1.out_features
     n_layers = model.params.n_layers

@@ -1,12 +1,11 @@
-from collections import defaultdict
 import logging
-from typing import List, Tuple, Callable, Optional, Any, Dict, Union
+from collections import defaultdict
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
 
 import flex_model.distributed as dist
-
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +38,7 @@ def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
 
     # We only interact among tensor parallel group to bcast
     torch.distributed.broadcast(
-        tensor=tensor,
-        src=0,
-        group=tp_group,
-        async_op=False,
+        tensor=tensor, src=0, group=tp_group, async_op=False,
     )
 
     logger.debug(f"Broadcast | IN: {tensor.shape}")
@@ -68,10 +64,7 @@ def broadcast_data_parallel(tensor: Tensor) -> Tensor:
 
     # We only interact among tensor parallel group to bcast
     torch.distributed.broadcast(
-        tensor=tensor,
-        src=0,
-        group=dp_group,
-        async_op=False,
+        tensor=tensor, src=0, group=dp_group, async_op=False,
     )
 
     logger.debug(f"Broadcast | IN: {tensor.shape}")
@@ -104,10 +97,7 @@ def all_gather_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
     tensor_list[tp_rank] = tensor
 
     torch.distributed.all_gather(
-        tensor_list,
-        tensor,
-        group=tp_group,
-        async_op=False,
+        tensor_list, tensor, group=tp_group, async_op=False,
     )
 
     output_tensor = torch.cat(tensor_list, dim=dim)
@@ -145,10 +135,7 @@ def all_gather_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
     tensor_list[dp_rank] = tensor
 
     torch.distributed.all_gather(
-        tensor_list,
-        tensor,
-        group=dp_group,
-        async_op=False,
+        tensor_list, tensor, group=dp_group, async_op=False,
     )
 
     output_tensor = torch.cat(tensor_list, dim=dim)
@@ -168,10 +155,7 @@ def _all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
 
     tensor = tensor.clone()
     torch.distributed.all_reduce(
-        tensor,
-        op=torch.distributed.ReduceOp.SUM,
-        group=tp_group,
-        async_op=False,
+        tensor, op=torch.distributed.ReduceOp.SUM, group=tp_group, async_op=False,
     )
 
     return tensor
@@ -268,12 +252,7 @@ def _group_by_dtype(
 
 # Tensor buffer metadata type.
 _TBUF_META = Dict[
-    str, Union[
-        int,
-        torch.dtype,
-        Dict[str, Tuple[int, int]],
-        Dict[str, torch.Size],
-    ]
+    str, Union[int, torch.dtype, Dict[str, Tuple[int, int]], Dict[str, torch.Size],]
 ]
 
 
@@ -310,10 +289,7 @@ def _make_flat_buffer(
     return tensor_buffer, meta
 
 
-def _gather_pipeline_parallel(
-    tbuf_groups,
-    all_metadata_groups,
-) -> Dict[str, Tensor]:
+def _gather_pipeline_parallel(tbuf_groups, all_metadata_groups,) -> Dict[str, Tensor]:
     world_size = dist.get_activation_pipeline_parallel_world_size()
     rank = dist.get_activation_pipeline_parallel_rank()
 
@@ -339,8 +315,9 @@ def _gather_pipeline_parallel(
                     buffer_rank = metadata["buffer_rank"]
                     buffer_size = metadata["buffer_size"]
                     buffer_dtype = metadata["buffer_dtype"]
-                    assert buffer_dtype == dtype, (
-                        f"Dtype mismatch: {buffer_dtype} and {dtype}")
+                    assert (
+                        buffer_dtype == dtype
+                    ), f"Dtype mismatch: {buffer_dtype} and {dtype}"
 
                     # Skip if the buffer src is rank0.
                     if buffer_rank == 0:
@@ -369,8 +346,7 @@ def _gather_pipeline_parallel(
             send_rank_groups[dtype].append(0)
 
             logger.debug(
-                f"Rank{rank}: Constructed send - "
-                f"({tbuf.numel()}) [{rank}] -> [0]"
+                f"Rank{rank}: Constructed send - " f"({tbuf.numel()}) [{rank}] -> [0]"
             )
 
     def _set_device(_buffer_list, device):
@@ -382,18 +358,19 @@ def _gather_pipeline_parallel(
     all_send_tbufs = []
     all_send_ranks = []
     for dtype in tbuf_groups.keys():
-        recv_tbufs = _set_device(recv_tbuf_groups[dtype], device=torch.cuda.current_device())
-        send_tbufs = _set_device(send_tbuf_groups[dtype], device=torch.cuda.current_device())
+        recv_tbufs = _set_device(
+            recv_tbuf_groups[dtype], device=torch.cuda.current_device()
+        )
+        send_tbufs = _set_device(
+            send_tbuf_groups[dtype], device=torch.cuda.current_device()
+        )
         all_recv_tbufs.extend(recv_tbufs)
         all_recv_ranks.extend(recv_rank_groups[dtype])
         all_send_tbufs.extend(send_tbufs)
         all_send_ranks.extend(send_rank_groups[dtype])
 
     batch_isend_irecv_pipeline_parallel(
-        all_recv_tbufs,
-        all_recv_ranks,
-        all_send_tbufs,
-        all_send_ranks,
+        all_recv_tbufs, all_recv_ranks, all_send_tbufs, all_send_ranks,
     )
     all_recv_tbufs = _set_device(all_recv_tbufs, device="cpu")
     all_send_tbufs = _set_device(all_send_tbufs, device="cpu")
@@ -401,10 +378,11 @@ def _gather_pipeline_parallel(
     # Unshard each tbuf into individual tensors.
     output_tensor_dict: Dict[str, Tensor] = {}
     if rank == 0:
+
         def _reshard_tbuf(meta, tbuf):
             for name, (start, end) in meta["name_to_index_map"].items():
                 shape = meta["name_to_shape_map"][name]
-                output_tensor_dict[name] = tbuf[start: end].reshape(shape)
+                output_tensor_dict[name] = tbuf[start:end].reshape(shape)
 
         # Add rank0 local tbufs.
         for dtype, tbuf in tbuf_groups.items():
@@ -419,10 +397,8 @@ def _gather_pipeline_parallel(
 
             buf_rank = meta["buffer_rank"]
             buf_dtype = meta["buffer_dtype"]
-            assert buf_dtype == dtype, (
-                f"Dtype mismatch: {buf_dtype} and {dtype}")
-            assert buf_rank == recv_r, (
-                f"Rank mismatch: {buf_rank} and {recv_r}")
+            assert buf_dtype == dtype, f"Dtype mismatch: {buf_dtype} and {dtype}"
+            assert buf_rank == recv_r, f"Rank mismatch: {buf_rank} and {recv_r}"
 
             _reshard_tbuf(meta, recv_tbuf)
 
@@ -452,10 +428,7 @@ def batch_isend_irecv_pipeline_parallel(
     p2p_ops = []
     for recv_t, recv_r in zip(recv_tensors, recv_from_ranks):
         op = torch.distributed.P2POp(
-            torch.distributed.irecv,
-            recv_t,
-            peer=recv_r,
-            group=group,
+            torch.distributed.irecv, recv_t, peer=recv_r, group=group,
         )
         p2p_ops.append(op)
 
@@ -463,10 +436,7 @@ def batch_isend_irecv_pipeline_parallel(
 
     for send_t, send_r in zip(send_tensors, send_to_ranks):
         op = torch.distributed.P2POp(
-            torch.distributed.isend,
-            send_t,
-            peer=send_r,
-            group=group,
+            torch.distributed.isend, send_t, peer=send_r, group=group,
         )
         p2p_ops.append(op)
 
@@ -523,16 +493,10 @@ def gather_pipeline_parallel_tensor_dicts(
         None for _ in range(world_size)
     ]
     torch.distributed.gather_object(
-        metadata_groups,
-        all_metadata_groups if rank == 0 else None,
-        dst=0,
-        group=group,
+        metadata_groups, all_metadata_groups if rank == 0 else None, dst=0, group=group,
     )
 
     # Communicate.
-    output_tensor_dict = _gather_pipeline_parallel(
-        tbuf_groups,
-        all_metadata_groups,
-    )
+    output_tensor_dict = _gather_pipeline_parallel(tbuf_groups, all_metadata_groups,)
 
     return output_tensor_dict

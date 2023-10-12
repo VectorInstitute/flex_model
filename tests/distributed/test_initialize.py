@@ -1,14 +1,13 @@
 import logging
 
+import fairscale.nn.model_parallel as mpu
 import torch
 import torch.distributed as dist
-import fairscale.nn.model_parallel as mpu
 
-from tests.test_utilities import Utils
 import flex_model.distributed as fm_dist
-from flex_model.utils import setup_logger
 from flex_model.distributed.backends import GPUDeviceMesh
-
+from flex_model.utils import setup_logger
+from tests.test_utilities import Utils
 
 logger = logging.getLogger(__name__)
 
@@ -23,30 +22,14 @@ def test_GPUDeviceMesh():
         (1, 4, 4),
         (4, 1, 4),
         (2, 2, 2),
-        (2, 4, 2)
+        (2, 4, 2),
     ]
     # (tp, pp, dp)
     solutions = [
-        [
-            [[0]],
-            [[0]],
-            [[0]],
-        ],
-        [
-            [[0, 1, 2, 3]],
-            [[0]],
-            [[0]],
-        ],
-        [
-            [[0], [1], [2], [3]],
-            [[0, 1, 2, 3]],
-            [[0], [1], [2], [3]],
-        ],
-        [
-            [[0], [1], [2], [3]],
-            [[0]],
-            [[0, 1, 2, 3]],
-        ],
+        [[[0]], [[0]], [[0]],],
+        [[[0, 1, 2, 3]], [[0]], [[0]],],
+        [[[0], [1], [2], [3]], [[0, 1, 2, 3]], [[0], [1], [2], [3]],],
+        [[[0], [1], [2], [3]], [[0]], [[0, 1, 2, 3]],],
         [
             [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]],
             [[0, 4, 8, 12]],
@@ -54,21 +37,16 @@ def test_GPUDeviceMesh():
         ],
         [
             [[i] for i in range(16)],
-            #[[0, 1, 2, 3]],
+            # [[0, 1, 2, 3]],
             [[0, 4, 8, 12]],
             [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]],
-
         ],
         [
             [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]],
             [[0]],
             [[0, 4, 8, 12]],
         ],
-        [
-            [[0, 1], [2, 3], [4, 5], [6, 7]],
-            [[0, 4]],
-            [[0, 2], [4, 6]],
-        ],
+        [[[0, 1], [2, 3], [4, 5], [6, 7]], [[0, 4]], [[0, 2], [4, 6]],],
         [
             [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 13], [14, 15]],
             [[0, 4, 8, 12]],

@@ -1,8 +1,9 @@
 accelerate
+black
+fairscale
+pre-commit
 sentencepiece
+sphinx-rtd-theme
 tokenizers
 torch
 transformers
-fairscale
-black
-sphinx-rtd-theme

@@ -2,9 +2,9 @@ import argparse
 from typing import Dict
 
 import torch
+from accelerate import Accelerator
 from torch import Tensor
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from accelerate import Accelerator
 
 from flex_model.core import FlexModel, HookFunction
 
@@ -45,8 +45,7 @@ def main(args):
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer_dir,
-        local_files_only=True,
+        args.tokenizer_dir, local_files_only=True,
     )
     tokenizer.pad_token_id = 0
     tokenizer.padding_side = "right"
@@ -57,9 +56,7 @@ def main(args):
 
     # Wrap model in FlexModel
     model = FlexModel(
-        model,
-        activation_dict,
-        data_parallel_size=accelerator.num_processes,
+        model, activation_dict, data_parallel_size=accelerator.num_processes,
     )
 
     # Create a hook function
@@ -74,17 +71,10 @@ def main(args):
     model.register_hook_function(hook_function)
 
     # Tokenize a prompt
-    inputs = tokenizer(
-        prompts,
-        padding="max_length",
-        return_tensors="pt",
-    )["input_ids"]
+    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt",)["input_ids"]
 
     # Split the batch across dp workers
-    dp_worker_inputs = inputs.chunk(
-        accelerator.num_processes,
-        dim=0,
-    )[
+    dp_worker_inputs = inputs.chunk(accelerator.num_processes, dim=0,)[
         accelerator.process_index
     ].to(accelerator.device)
 
