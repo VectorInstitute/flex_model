@@ -238,26 +238,9 @@ def scatter_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
     return output_tensor
 
 
-def gather_pipeline_parallel(objects: Any) -> Any:
-    if not dist.in_pipeline_parallel_group():
-        return objects
-
-    pp_world_size = dist.get_activation_pipeline_parallel_world_size()
-    pp_rank = dist.get_activation_pipeline_parallel_rank()
-
-    output = [None for _ in range(pp_world_size)]
-    torch.distributed.gather_object(
-        objects,
-        output if pp_rank == 0 else None,
-        dst=0,
-    )
-
-    if pp_rank == 0:
-        logger.debug(f"Gather | IN: {len(objects)} -> {len(output)}")
-    return output
-
-
-def _group_by_dtype(tensor_dict: Dict[str, Tensor]) -> Dict[str, Dict[str, Tensor]]:
+def _group_by_dtype(
+    tensor_dict: Dict[str, Tensor]
+) -> Dict[torch.dtype, Dict[str, Tensor]]:
     fp32_groups = {}
     fp16_groups = {}
     bf16_groups = {}
@@ -283,7 +266,20 @@ def _group_by_dtype(tensor_dict: Dict[str, Tensor]) -> Dict[str, Dict[str, Tenso
     return dtype_groups
 
 
-def _make_flat_buffer(tensor_dict: Dict[str, Tensor]) -> Tuple[Tensor, Dict[str, Any]]:
+# Tensor buffer metadata type.
+_TBUF_META = Dict[
+    str, Union[
+        int,
+        torch.dtype,
+        Dict[str, Tuple[int, int]],
+        Dict[str, torch.Size],
+    ]
+]
+
+
+def _make_flat_buffer(
+    tensor_dict: Dict[str, Tensor],
+) -> Tuple[Optional[Tensor], Optional[_TBUF_META]]:
     tensors = []
     name_to_index_map = {}
     name_to_shape_map = {}
@@ -303,7 +299,7 @@ def _make_flat_buffer(tensor_dict: Dict[str, Tensor]) -> Tuple[Tensor, Dict[str,
 
     tensor_buffer = torch.cat(tensors)
 
-    meta = {
+    meta: _TBUF_META = {
         "buffer_rank": dist.get_activation_pipeline_parallel_rank(),
         "buffer_size": tensor_buffer.numel(),
         "buffer_dtype": tensor_buffer.dtype,
@@ -315,92 +311,122 @@ def _make_flat_buffer(tensor_dict: Dict[str, Tensor]) -> Tuple[Tensor, Dict[str,
 
 
 def _gather_pipeline_parallel(
-    dtype_to_tensor_buffer: Dict[str, Tensor],
-    all_dtype_to_metadata: List[Dict[str, Any]],
-) -> Union[Dict[str, List[Tensor]], Dict[str, List[None]]]:
+    tbuf_groups,
+    all_metadata_groups,
+) -> Dict[str, Tensor]:
     world_size = dist.get_activation_pipeline_parallel_world_size()
     rank = dist.get_activation_pipeline_parallel_rank()
 
     # Setup collections for communication
-    # Rank 0 uses all of the metadata objects.
+    def _empty_groups() -> Dict[torch.dtype, List[Union[Tensor, int]]]:
+        return {dtype: [] for dtype in tbuf_groups.keys()}
+
+    recv_tbuf_groups = _empty_groups()
+    recv_rank_groups = _empty_groups()
+    send_tbuf_groups = _empty_groups()
+    send_rank_groups = _empty_groups()
+
+    # Construct recv tensors and src ranks.
+    # NOTE: Only rank0 participates in recvs.
     if rank == 0:
-        recv_tensors = defaultdict(list)
-        recv_ranks = defaultdict(list)
-        for dtype_to_metadata in all_dtype_to_metadata:
-            for dtype, tensor_buffer_metadata in dtype_to_metadata.items():
-                # Skip if there's nothing to receive.
-                if tensor_buffer_metadata is None:
-                    recv_tensors[dtype] = []
-                    recv_ranks[dtype] = []
-                    continue
+        for metadata_groups in all_metadata_groups:
+            if metadata_groups is not None:
+                for dtype, metadata in metadata_groups.items():
+                    # Skip if there's no tbuf to recv for the dtype.
+                    if metadata is None:
+                        continue
 
-                buffer_rank = tensor_buffer_metadata["buffer_rank"]
-                buffer_size = tensor_buffer_metadata["buffer_size"]
-                buffer_dtype = tensor_buffer_metadata["buffer_dtype"]
-                assert buffer_dtype == dtype
+                    buffer_rank = metadata["buffer_rank"]
+                    buffer_size = metadata["buffer_size"]
+                    buffer_dtype = metadata["buffer_dtype"]
+                    assert buffer_dtype == dtype, (
+                        f"Dtype mismatch: {buffer_dtype} and {dtype}")
 
-                # Skip rank 0, nothing to receive.
-                if buffer_rank == 0:
-                    continue
+                    # Skip if the buffer src is rank0.
+                    if buffer_rank == 0:
+                        continue
 
-                recv_tensor = torch.empty((buffer_size,), dtype=buffer_dtype)
-                recv_rank = buffer_rank
+                    tbuf = torch.empty((buffer_size,), dtype=buffer_dtype)
+                    src_rank = buffer_rank
+                    recv_tbuf_groups[dtype].append(tbuf)
+                    recv_rank_groups[dtype].append(src_rank)
 
-                recv_tensors[dtype].append(recv_tensor)
-                recv_ranks[dtype].append(recv_rank)
+                    logger.debug(
+                        f"Rank{rank}: Constructed recv - "
+                        f"({tbuf.numel()}) [{src_rank}] -> [0]"
+                    )
 
-        send_tensors = {dtype: [] for dtype in dtype_to_tensor_buffer.keys()}
-        send_ranks = {dtype: [] for dtype in dtype_to_tensor_buffer.keys()}
-
-    # Other ranks handle their local tensor buffers.
+    # Construct send tensors and dst ranks.
+    # NOTE: Only non-rank0 participate in sends.
     else:
-        recv_tensors = {dtype: [] for dtype in dtype_to_tensor_buffer.keys()}
-        recv_ranks = {dtype: [] for dtype in dtype_to_tensor_buffer.keys()}
-
-        send_tensors = {}
-        send_ranks = {}
-        for dtype, tensor_buffer in dtype_to_tensor_buffer.items():
-            # Skip if there's nothing to send.
-            if tensor_buffer is None:
-                send_tensors[dtype] = []
-                send_ranks[dtype] = []
+        for dtype, tbuf in tbuf_groups.items():
+            # Skip if there's no tbuf to send for the dtype.
+            if tbuf is None:
                 continue
 
-            send_tensors[dtype] = [tensor_buffer]
-            send_ranks[dtype] = [0]
+            # Send dst always rank0.
+            send_tbuf_groups[dtype].append(tbuf)
+            send_rank_groups[dtype].append(0)
 
-    logger.debug(f"Rank{rank}: recv - {recv_tensors}")
-    logger.debug(f"Rank{rank}: recv_ranks - {recv_ranks}")
-    logger.debug(f"Rank{rank}: send - {send_tensors}")
-    logger.debug(f"Rank{rank}: send_ranks - {send_ranks}")
+            logger.debug(
+                f"Rank{rank}: Constructed send - "
+                f"({tbuf.numel()}) [{rank}] -> [0]"
+            )
 
-    # Batched p2p communication for each dtype.
     def _set_device(_buffer_list, device):
         return [_buffer.to(device) for _buffer in _buffer_list]
 
-    for dtype in dtype_to_tensor_buffer.keys():
-        recv_tensors_ = _set_device(recv_tensors[dtype], device=torch.cuda.current_device())
-        send_tensors_ = _set_device(send_tensors[dtype], device=torch.cuda.current_device())
+    # Batched communication across all dtype groups.
+    all_recv_tbufs = []
+    all_recv_ranks = []
+    all_send_tbufs = []
+    all_send_ranks = []
+    for dtype in tbuf_groups.keys():
+        recv_tbufs = _set_device(recv_tbuf_groups[dtype], device=torch.cuda.current_device())
+        send_tbufs = _set_device(send_tbuf_groups[dtype], device=torch.cuda.current_device())
+        all_recv_tbufs.extend(recv_tbufs)
+        all_recv_ranks.extend(recv_rank_groups[dtype])
+        all_send_tbufs.extend(send_tbufs)
+        all_send_ranks.extend(send_rank_groups[dtype])
 
-        batch_isend_irecv_pipeline_parallel(
-            recv_tensors_,
-            recv_ranks[dtype],
-            send_tensors_,
-            send_ranks[dtype],
-        )
+    batch_isend_irecv_pipeline_parallel(
+        all_recv_tbufs,
+        all_recv_ranks,
+        all_send_tbufs,
+        all_send_ranks,
+    )
+    all_recv_tbufs = _set_device(all_recv_tbufs, device="cpu")
+    all_send_tbufs = _set_device(all_send_tbufs, device="cpu")
 
-        recv_tensors[dtype] = _set_device(recv_tensors_, device="cpu")
-        send_tensors[dtype] = _set_device(send_tensors_, device="cpu")
+    # Unshard each tbuf into individual tensors.
+    output_tensor_dict: Dict[str, Tensor] = {}
+    if rank == 0:
+        def _reshard_tbuf(meta, tbuf):
+            for name, (start, end) in meta["name_to_index_map"].items():
+                shape = meta["name_to_shape_map"][name]
+                output_tensor_dict[name] = tbuf[start: end].reshape(shape)
 
-    # Update input with the gathered tensors.
-    updated_tensor_dict = {}
-    for dtype in dtype_to_tensor_buffer.keys():
-        rank0_tensor = dtype_to_tensor_buffer[dtype]
-        gathered_tensors = recv_tensors[dtype]
-        updated_tensor_dict[dtype] = [rank0_tensor] if rank0_tensor is not None else []
-        updated_tensor_dict[dtype].extend(gathered_tensors)
+        # Add rank0 local tbufs.
+        for dtype, tbuf in tbuf_groups.items():
+            meta = all_metadata_groups[0][dtype]
+            if meta is not None:
+                _reshard_tbuf(meta, tbuf)
 
-    return updated_tensor_dict
+        # Add gathered tbufs.
+        for recv_tbuf, recv_r in zip(all_recv_tbufs, all_recv_ranks):
+            dtype = recv_tbuf.dtype
+            meta = all_metadata_groups[recv_r][dtype]
+
+            buf_rank = meta["buffer_rank"]
+            buf_dtype = meta["buffer_dtype"]
+            assert buf_dtype == dtype, (
+                f"Dtype mismatch: {buf_dtype} and {dtype}")
+            assert buf_rank == recv_r, (
+                f"Rank mismatch: {buf_rank} and {recv_r}")
+
+            _reshard_tbuf(meta, recv_tbuf)
+
+    return output_tensor_dict
 
 
 def batch_isend_irecv_pipeline_parallel(
@@ -437,16 +463,20 @@ def batch_isend_irecv_pipeline_parallel(
         )
         p2p_ops.append(op)
 
-        logger.debug(f"Rank{rank}: P2POp (isend) [{rank}] <- [{send_r}]")
+        logger.debug(f"Rank{rank}: P2POp (isend) [{rank}] -> [{send_r}]")
 
     if len(p2p_ops) == 0:
         return
 
-    logger.debug(f"Rank{rank}: Launching P2POps list - {p2p_ops}")
+    logger.debug(f"Rank{rank}: Launching P2POps")
 
     reqs = torch.distributed.batch_isend_irecv(p2p_ops)
     for req in reqs:
         req.wait()
+
+    _msg = lambda t_list: ", ".join([f"({t.numel()}, {t.dtype})" for t in t_list])
+    logger.debug(f"Rank{rank}: Received buffers - [{_msg(recv_tensors)}]")
+    logger.debug(f"Rank{rank}: Sent buffers - [{_msg(send_tensors)}]")
 
     # TODO: Remove after verification that no race cond. occurs.
     torch.cuda.synchronize()
@@ -470,58 +500,32 @@ def gather_pipeline_parallel_tensor_dicts(
     rank = dist.get_activation_pipeline_parallel_rank()
     group = dist.get_activation_pipeline_parallel_group()
 
-    dtype_to_tensor_dict = _group_by_dtype(tensor_dict)
+    tensor_dict_groups = _group_by_dtype(tensor_dict)
 
     # Convert tensor dicts into flattened buffers with metadata.
-    dtype_to_tensor_buffer = {}
-    dtype_to_metadata = {}
-    for dtype, tensor_dict in dtype_to_tensor_dict.items():
-        tensor_buffer, metadata = _make_flat_buffer(tensor_dict)
+    tbuf_groups = {}
+    metadata_groups = {}
+    for dtype, tensor_dict in tensor_dict_groups.items():
+        tbuf, meta = _make_flat_buffer(tensor_dict)
 
-        if tensor_buffer is not None and metadata is not None:
-            assert tensor_buffer.dtype == metadata["buffer_dtype"] == dtype, (
-                f"Dtype mismatch: {tensor_buffer.dtype}, {metadata['buffer_dtype']}, "
-                f"{dtype}."
-            )
-
-        dtype_to_tensor_buffer[dtype] = tensor_buffer
-        dtype_to_metadata[dtype] = metadata
+        tbuf_groups[dtype] = tbuf
+        metadata_groups[dtype] = meta
 
     # Gather metadata on rank 0 to setup recv tensors.
-    all_dtype_to_metadata: List[Dict[str, Any]] = [
+    all_metadata_groups: List[Optional[Dict[torch.dtype, _TBUF_META]]] = [
         None for _ in range(world_size)
     ]
     torch.distributed.gather_object(
-        dtype_to_metadata,
-        all_dtype_to_metadata if rank == 0 else None,
+        metadata_groups,
+        all_metadata_groups if rank == 0 else None,
         dst=0,
         group=group,
     )
 
     # Communicate.
-    dtype_to_all_tensor_buffers = _gather_pipeline_parallel(
-        dtype_to_tensor_buffer,
-        all_dtype_to_metadata,
+    output_tensor_dict = _gather_pipeline_parallel(
+        tbuf_groups,
+        all_metadata_groups,
     )
 
-    # Re-constitute tensor buffers.
-    tensor_dict = {}
-    if rank == 0:
-        # Change map to: dtype -> list of meta for all ranks.
-        dtype_to_all_tensor_buffer_metadata = defaultdict(list)
-        for dtype_to_meta in all_dtype_to_metadata:
-            for dtype, meta in dtype_to_meta.items():
-                dtype_to_all_tensor_buffer_metadata[dtype].append(meta)
-
-        # Unflatten buffers and separate the tensors by index.
-        for dtype, tensor_buffers in dtype_to_all_tensor_buffers.items():
-            metadata = dtype_to_all_tensor_buffer_metadata[dtype]
-
-            for t_buf, meta in zip(tensor_buffers, metadata):
-                for name in meta["name_to_index_map"].keys():
-                    start, end = meta["name_to_index_map"][name]
-                    shape = meta["name_to_shape_map"][name]
-                    tensor = t_buf[start: end].reshape(shape)
-                    tensor_dict[name] = tensor
-
-    return tensor_dict
+    return output_tensor_dict
