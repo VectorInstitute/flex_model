@@ -72,6 +72,8 @@ def main(args):
                 editing_function=None,
             )
         )
+        for i in range(n_layers)
+    ]
     flex_model.enable_forward_hooks()
 
     start_t = time.time()

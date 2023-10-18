@@ -31,7 +31,8 @@ from .mappings import (
     all_gather_data_parallel,
     scatter_tensor_parallel,
     scatter_data_parallel,
-    gather_pipeline_parallel,
+    batch_isend_irecv_pipeline_parallel,
+    gather_pipeline_parallel_tensor_dicts,
 )
 from .parse import (
     parse_collect_from_parameter_tensor,
