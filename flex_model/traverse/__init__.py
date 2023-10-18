@@ -1,12 +1,9 @@
-from .ops import (
-    flatten,
-    unflatten,
-)
 from .nodes import (
-    InternalObject,
-    LeafObject,
-    ScalarObject,
     InternalNode,
+    InternalObject,
     LeafNode,
+    LeafObject,
     ScalarNode,
+    ScalarObject,
 )
+from .ops import flatten, unflatten

@@ -47,7 +47,7 @@ def editing_function(current_module, inputs, save_ctx, modules) -> Tensor
 	edited_activations = modules["mlp"].forward(edited_activations)
 
 	return edited_activations
-	
+
 # Create hook function
 hook_function = HookFunction(
 	module_name="layers.7.feed_forward.w1",

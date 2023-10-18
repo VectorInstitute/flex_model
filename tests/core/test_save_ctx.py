@@ -1,16 +1,15 @@
-from functools import partial
 import logging
+from functools import partial
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from accelerate import Accelerator
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from flex_model.core import FlexModel, HookFunction
 import flex_model.distributed as dist
+from flex_model.core import FlexModel, HookFunction
 from flex_model.utils import setup_logger
 from tests.registry import register_test
 from tests.test_utilities import make_model_and_tokenizer
-
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +22,7 @@ def test_save_ctx():
     model = accelerator.prepare(model)
 
     activations = {}
-    model = FlexModel(
-        model,
-        activations,
-        data_parallel_size=accelerator.num_processes,
-    )
+    model = FlexModel(model, activations, data_parallel_size=accelerator.num_processes,)
 
     prompts = [
         "It's a nice day we're having",
@@ -36,11 +31,7 @@ def test_save_ctx():
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(
-        prompts,
-        padding="max_length",
-        return_tensors="pt",
-    )["input_ids"]
+    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt",)["input_ids"]
 
     # Function to save an activation tensor for later use. The same activation
     # tensor is also saved into the `activations` dict we passed initially to
@@ -57,9 +48,7 @@ def test_save_ctx():
         return inputs
 
     retrieve_hook_fn = HookFunction(
-        "_fsdp_wrapped_module.model.layers.12",
-        (None, None, 5120),
-        retrieve_fn,
+        "_fsdp_wrapped_module.model.layers.12", (None, None, 5120), retrieve_fn,
     )
     verify_hook_fn = HookFunction(
         "_fsdp_wrapped_module.model.layers.30",

@@ -1,15 +1,15 @@
+import logging
 from argparse import Namespace
 from contextlib import contextmanager
-import logging
 from typing import (
-    List,
     Any,
-    Dict,
-    Optional,
     Callable,
-    Tuple,
+    Dict,
     Generator,
     Iterator,
+    List,
+    Optional,
+    Tuple,
     Union,
 )
 
@@ -26,8 +26,8 @@ from flex_model.traverse import (
     flatten,
     unflatten,
 )
-from .hook_function import HookFunction
 
+from .hook_function import HookFunction
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,7 @@ class FlexModel(nn.Module):
         outputs = flex_model(inputs)
 
     """
+
     # TODO: Backward hook refactor
     # TODO: Tests for each function independently
 
@@ -145,10 +146,7 @@ class FlexModel(nn.Module):
         if torch.distributed.is_initialized():
             world_size = self.tp_size * self.pp_size * self.dp_size
             dist.initialize_distributed_backend(
-                world_size,
-                self.tp_size,
-                self.pp_size,
-                self.dp_size,
+                world_size, self.tp_size, self.pp_size, self.dp_size,
             )
             dist.initialize_activation_parallel()
 
@@ -162,7 +160,10 @@ class FlexModel(nn.Module):
         :param HookFunction hook_function: User-defined :class:`HookFunction` instance
             to register.
         """
-        if isinstance(self.module, FSDP) and hook_function.hook_type == "tensor_backward":
+        if (
+            isinstance(self.module, FSDP)
+            and hook_function.hook_type == "tensor_backward"
+        ):
             raise NotImplementedError(
                 "Pytorch FSDP is currently not supported for parameter/grad "
                 "level hooks yet."
@@ -208,9 +209,7 @@ class FlexModel(nn.Module):
 
                 hook_registry_function = hook_function._hook_registry_function
                 module_hook_registry_function = getattr(
-                    submod,
-                    hook_registry_function,
-                    None,
+                    submod, hook_registry_function, None,
                 )
                 assert module_hook_registry_function is not None, (
                     f"Module can't find hook registry function: "
@@ -219,9 +218,7 @@ class FlexModel(nn.Module):
                 handle = module_hook_registry_function(hook_function)
 
                 self._hook_function_handles[module_name] = handle
-                logger.debug(
-                    f"Intalling hook function on module {module_name}"
-                )
+                logger.debug(f"Intalling hook function on module {module_name}")
 
             self._hooks_active = True
 
@@ -260,9 +257,7 @@ class FlexModel(nn.Module):
             self.disable_forward_hooks()
 
     def get_module_parameter(
-        self,
-        parameter_name: str,
-        expected_shape: Tuple[int, ...],
+        self, parameter_name: str, expected_shape: Tuple[int, ...],
     ) -> Tensor:
         """Retrieves unsharded parameter from wrapped module.
 
@@ -291,8 +286,7 @@ class FlexModel(nn.Module):
 
         local_param = self.module.get_parameter(parameter_name).detach()
         collect_fn = dist.parse_collect_from_parameter_tensor(
-            local_param,
-            expected_shape,
+            local_param, expected_shape,
         )
         full_param = collect_fn(local_param).cpu()
         return full_param
@@ -309,9 +303,7 @@ class FlexModel(nn.Module):
             and dist.in_pipeline_parallel_group()
             and dist.get_activation_pipeline_parallel_world_size() > 1
         ):
-            gathered_acts = dist.gather_pipeline_parallel_tensor_dicts(
-                self.output_ptr,
-            )
+            gathered_acts = dist.gather_pipeline_parallel_tensor_dicts(self.output_ptr,)
 
             # Rank 0 accumulates the activation tensors.
             if dist.get_activation_pipeline_parallel_rank() == 0:
@@ -355,11 +347,10 @@ class FlexModel(nn.Module):
             self.disable_forward_hooks()
             outputs = self.module(*args, **kwargs)
             self.enable_forward_hooks()
-        
+
         else:
             outputs = self.module(*args, **kwargs)
         return outputs
-            
 
     def forward(self, *args, with_hooks: bool = True, **kwargs) -> Any:
         """Run forward pass of the wrapped module with arbitrary arguments.
@@ -453,7 +444,7 @@ class FlexModel(nn.Module):
         self._hooks_active = False
         self.save_ctx = Namespace()
         self.trainable_modules.clear()
-        
+
         if torch.distributed.is_initialized():
             dist.destroy_activation_parallel()
             dist.destroy_distributed_backend()

@@ -1,12 +1,11 @@
-from functools import partial, reduce
 import logging
-from typing import List, Tuple, Callable, Optional
+from functools import partial, reduce
+from typing import Callable, List, Optional, Tuple
 
 import torch
 from torch import Tensor
 
 import flex_model.distributed as dist
-
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +80,7 @@ def _autofill_expected_shape(
 
 
 def parse_collect_from_parameter_tensor(
-    tensor: Tensor,
-    expected_shape: Tuple[Optional[int], ...],
+    tensor: Tensor, expected_shape: Tuple[Optional[int], ...],
 ) -> Callable:
     """Find the communication function which gathers the full parameter tensor.
 
@@ -144,8 +142,7 @@ def parse_collect_from_parameter_tensor(
 
 
 def parse_collect_and_distribute_from_tensor(
-    tensor: Tensor,
-    expected_shape: Tuple[Optional[int], ...],
+    tensor: Tensor, expected_shape: Tuple[Optional[int], ...],
 ) -> Tuple[Callable, Callable]:
     """Find the appropriate collect/disperse communication function.
 
@@ -220,12 +217,10 @@ def parse_collect_and_distribute_from_tensor(
         # Sharded over tp
         else:
             collect_fn = lambda t: dist.all_gather_data_parallel(
-                dist.all_gather_tensor_parallel(t, dim=sharded_dim),
-                dim=0,
+                dist.all_gather_tensor_parallel(t, dim=sharded_dim), dim=0,
             )
             disperse_fn = lambda t: dist.scatter_tensor_parallel(
-                dist.scatter_data_parallel(t, dim=0),
-                dim=sharded_dim,
+                dist.scatter_data_parallel(t, dim=0), dim=sharded_dim,
             )
 
     else:
