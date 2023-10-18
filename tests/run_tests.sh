@@ -12,6 +12,10 @@ torchrun \
 
 accelerate launch core/test_huggingface_multi_gpu.py
 
+python core/test_core_wrapper_single_gpu.py
+
+python core/test_hook_function_single_gpu.py
+
 accelerate launch core/test_save_ctx.py
 
 torchrun \

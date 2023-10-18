@@ -302,8 +302,8 @@ def _make_flat_buffer(
 
 
 def _gather_pipeline_parallel(
-    tbuf_groups,
-    all_metadata_groups,
+    tbuf_groups: Dict[torch.dtype, Optional[Tensor]],
+    all_metadata_groups: List[Optional[Dict[torch.dtype, _TBUF_META]]],
 ) -> Dict[str, Tensor]:
     world_size = dist.get_activation_pipeline_parallel_world_size()
     rank = dist.get_activation_pipeline_parallel_rank()
@@ -322,7 +322,7 @@ def _gather_pipeline_parallel(
     if rank == 0:
         for metadata_groups in all_metadata_groups:
             # Skip if the rank has no tbufs to recv for any dtype.
-            if metadata_groups is not None:
+            if metadata_groups is None:
                 continue
 
             for dtype, metadata in metadata_groups.items():
@@ -489,7 +489,7 @@ def batch_isend_irecv_pipeline_parallel(
 def gather_pipeline_parallel_tensor_dicts(
     tensor_dict: Dict[str, Tensor]
 ) -> Dict[str, Tensor]:
-    """Gather tensors from non-zero ranks to global rank0 in the pipeline group.
+    """Gather groups of tensors from ranks of the pipeline group to pipeline rank0.
 
     :param tensor_dict: Some python object that can be pickled. May contain tensors.
     :type tensor_dict Dict[str, Tensor]:
