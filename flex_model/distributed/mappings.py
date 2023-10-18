@@ -241,27 +241,18 @@ def scatter_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
 def _group_by_dtype(
     tensor_dict: Dict[str, Tensor]
 ) -> Dict[torch.dtype, Dict[str, Tensor]]:
-    fp32_groups = {}
-    fp16_groups = {}
-    bf16_groups = {}
-    for name, tensor in tensor_dict.items():
-        if tensor.dtype == torch.float32:
-            fp32_groups[name] = tensor
-        elif tensor.dtype == torch.float16:
-            fp16_groups[name] = tensor
-        elif tensor.dtype == torch.bfloat16:
-            bf16_groups[name] = tensor
-        else:
-            raise NotImplementedError(
-                f"Tensor with dtype: {tensor.dtype} is not supported for "
-                f"gathering across PP ranks."
-            )
-
-    dtype_groups = {
-        torch.float32: fp32_groups,
-        torch.float16: fp16_groups,
-        torch.bfloat16: bf16_groups,
+    dtypes = [torch.float32, torch.float16, torch.bfloat16]
+    dtype_groups: Dict[torch.dtype, Dict[str, Tensor]] = {
+        dtype: {}
+        for dtype in dtypes
     }
+
+    for name, tensor in tensor_dict.items():
+        assert tensor.dtype in dtype_groups, (
+            f"Tensor with dtype: {tensor.dtype} is not supported for "
+            f"gathering across PP ranks."
+        )
+        dtype_groups[tensor.dtype][name] = tensor
 
     return dtype_groups
 
@@ -330,31 +321,31 @@ def _gather_pipeline_parallel(
     # NOTE: Only rank0 participates in recvs.
     if rank == 0:
         for metadata_groups in all_metadata_groups:
+            # Skip if the rank has no tbufs to recv for any dtype.
             if metadata_groups is not None:
-                for dtype, metadata in metadata_groups.items():
-                    # Skip if there's no tbuf to recv for the dtype.
-                    if metadata is None:
-                        continue
+                continue
 
-                    buffer_rank = metadata["buffer_rank"]
-                    buffer_size = metadata["buffer_size"]
-                    buffer_dtype = metadata["buffer_dtype"]
-                    assert buffer_dtype == dtype, (
-                        f"Dtype mismatch: {buffer_dtype} and {dtype}")
+            for dtype, metadata in metadata_groups.items():
+                # Skip if there's no tbuf to recv for the dtype or the source
+                # rank is 0 (rank0 never sends).
+                if metadata is None or metadata["buffer_rank"] == 0:
+                    continue
 
-                    # Skip if the buffer src is rank0.
-                    if buffer_rank == 0:
-                        continue
+                buffer_rank = metadata["buffer_rank"]
+                buffer_size = metadata["buffer_size"]
+                buffer_dtype = metadata["buffer_dtype"]
+                assert buffer_dtype == dtype, (
+                    f"Dtype mismatch: {buffer_dtype} and {dtype}")
 
-                    tbuf = torch.empty((buffer_size,), dtype=buffer_dtype)
-                    src_rank = buffer_rank
-                    recv_tbuf_groups[dtype].append(tbuf)
-                    recv_rank_groups[dtype].append(src_rank)
+                tbuf = torch.empty((buffer_size,), dtype=buffer_dtype)
+                src_rank = buffer_rank
+                recv_tbuf_groups[dtype].append(tbuf)
+                recv_rank_groups[dtype].append(src_rank)
 
-                    logger.debug(
-                        f"Rank{rank}: Constructed recv - "
-                        f"({tbuf.numel()}) [{src_rank}] -> [0]"
-                    )
+                logger.debug(
+                    f"Rank{rank}: Constructed recv - "
+                    f"({tbuf.numel()}) [{src_rank}] -> [0]"
+                )
 
     # Construct send tensors and dst ranks.
     # NOTE: Only non-rank0 participate in sends.
@@ -446,8 +437,14 @@ def batch_isend_irecv_pipeline_parallel(
     rank = dist.get_activation_pipeline_parallel_rank()
     group = dist.get_activation_pipeline_parallel_group()
 
-    assert len(recv_tensors) == len(recv_from_ranks)
-    assert len(send_tensors) == len(send_to_ranks)
+    assert len(recv_tensors) == len(recv_from_ranks), (
+        f"Mistmatch in recv tensors({len(recv_tensors)}) and "
+        f"recv ranks({len(recv_from_ranks)})"
+    )
+    assert len(send_tensors) == len(send_to_ranks), (
+        f"Mistmatch in send tensors({len(send_tensors)}) and "
+        f"send ranks({len(send_to_ranks)})"
+    )
 
     p2p_ops = []
     for recv_t, recv_r in zip(recv_tensors, recv_from_ranks):
@@ -492,7 +489,7 @@ def batch_isend_irecv_pipeline_parallel(
 def gather_pipeline_parallel_tensor_dicts(
     tensor_dict: Dict[str, Tensor]
 ) -> Dict[str, Tensor]:
-    """Gather tensors from non-zero ranks to rank0 in the pipeline group.
+    """Gather tensors from non-zero ranks to global rank0 in the pipeline group.
 
     :param tensor_dict: Some python object that can be pickled. May contain tensors.
     :type tensor_dict Dict[str, Tensor]:
