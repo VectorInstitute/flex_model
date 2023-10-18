@@ -19,7 +19,7 @@ def parse_args():
         "--checkpoint-dir", type=str, default="/model-weights/Llama-2-13b"
     )
     parser.add_argument(
-        "--tokenizer-dir",
+        "--tokenizer-path",
         type=str,
         default="/model-weights/Llama-2-13b/tokenizer.model",
     )
@@ -36,7 +36,7 @@ def main(args):
     # Build the llama-2 model to benchmark on.
     generator = Llama.build(
         ckpt_dir=args.checkpoint_dir,
-        tokenizer_path=args.tokenizer_dir,
+        tokenizer_path=args.tokenizer_path,
         max_seq_len=args.max_seq_len,
         max_batch_size=args.max_batch_size,
     )
