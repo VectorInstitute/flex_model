@@ -21,22 +21,22 @@ backend is being used in the __init__method of the core `FlexModel` class.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+
 import logging
+from dataclasses import dataclass
 from typing import List, Optional, Type
 
+import accelerate
 import torch
 import torch.distributed as pt_dist
-import accelerate
 from accelerate import PartialState
 
 from flex_model.distributed.backends import (
-    DistributedBackend,
-    TorchDistributedBackend,
     AccelerateDistributedBackend,
+    DistributedBackend,
     GPUDeviceMesh,
+    TorchDistributedBackend,
 )
-
 
 _SUPPORTED_BACKENDS = {
     "torch": TorchDistributedBackend,
@@ -76,10 +76,7 @@ def initialize_distributed_backend(
     logger.debug(f"Using DistributedBackend: {backend_cls.__name__}")
 
     device_mesh = GPUDeviceMesh.build(
-        world_size,
-        tensor_parallel_size,
-        pipeline_parallel_size,
-        data_parallel_size,
+        world_size, tensor_parallel_size, pipeline_parallel_size, data_parallel_size,
     )
 
     backend = backend_cls(device_mesh)

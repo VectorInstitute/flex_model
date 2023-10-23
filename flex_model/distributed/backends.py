@@ -1,12 +1,11 @@
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-import logging
 from typing import List, Optional
 
 import torch
 import torch.distributed as pt_dist
 from accelerate import PartialState
-
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +76,7 @@ class GPUDeviceMesh:
         num_dp_groups = pipeline_parallel_size
 
         mesh = torch.arange(world_size).reshape(
-            pipeline_parallel_size,
-            data_parallel_size,
-            tensor_parallel_size,
+            pipeline_parallel_size, data_parallel_size, tensor_parallel_size,
         )
 
         # Build tensor parallel groups
@@ -114,6 +111,7 @@ class DistributedBackend(ABC):
     distributed backends must implement methods for managing models as a 3D
     (tensor, pipeline and parallel) mesh.
     """
+
     @abstractmethod
     def initialize_activation_parallel(self) -> None:
         ...
@@ -179,7 +177,7 @@ class TorchDistributedBackend(DistributedBackend):
     """Distributed backend using for Pytorch distributed.
 
     See parent class :class:`DistributedBackend` for details.
-    
+
     :var GPUDeviceMesh device_mesh: Mesh of GPU devices that defines the
         :class:`FlexModel` activation management strategy.
     :var all_tp_groups: All tensor parallel :code:`torch.distributed` groups.
@@ -201,6 +199,7 @@ class TorchDistributedBackend(DistributedBackend):
         :code:`Megatron-LM`, some of the data and pipeline parallel groups are
         redundant for our use cases.
     """
+
     def __init__(self, device_mesh: GPUDeviceMesh) -> None:
         """Instantiates the torch distributed backend.
 
@@ -416,7 +415,7 @@ class AccelerateDistributedBackend(DistributedBackend):
     """Distributed backend using for Pytorch distributed.
 
     See parent class :class:`DistributedBackend` for details.
-    
+
     :var GPUDeviceMesh device_mesh: Mesh of GPU devices that defines the
         :class:`FlexModel` activation management strategy.
     :var all_tp_groups: All tensor parallel :code:`torch.distributed` groups.
@@ -438,6 +437,7 @@ class AccelerateDistributedBackend(DistributedBackend):
         :code:`Megatron-LM`, some of the data and pipeline parallel groups are
         redundant for our use cases.
     """
+
     # TODO: Just a copy of torch distributed backend. Need to add in
     #       accelerate-specific methods.
     def __init__(self, device_mesh: GPUDeviceMesh) -> None:

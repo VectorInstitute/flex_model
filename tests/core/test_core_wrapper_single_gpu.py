@@ -1,9 +1,10 @@
-from flex_model.core import FlexModel, HookFunction
+from argparse import Namespace
+
 import torch
 import torch.nn as nn
-from argparse import Namespace
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from flex_model.core import FlexModel, HookFunction
 
 MODULE_NAME_1 = "model.layers.27.mlp"
 MODULE_NAME_2 = "model.layers.28.mlp"
@@ -18,8 +19,7 @@ PROMPTS = [
 def make_tokenizer():
     """Helper function to construct a llama-2 tokenizer."""
     tokenizer = AutoTokenizer.from_pretrained(
-        "/model-weights/Llama-2-13b-hf/",
-        local_files_only=True,
+        "/model-weights/Llama-2-13b-hf/", local_files_only=True,
     )
     tokenizer.pad_token_id = 0
     tokenizer.padding_side = "right"
@@ -49,15 +49,9 @@ def test_register_hook_function():
     model.cuda()
 
     activations = {}
-    model = FlexModel(
-        model,
-        activations,
-    )
+    model = FlexModel(model, activations,)
 
-    my_hook_function = HookFunction(
-        MODULE_NAME_1,
-        expected_shape=(None, None, None),
-    )
+    my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None),)
 
     model.register_hook_function(my_hook_function)
 
@@ -78,19 +72,10 @@ def test_register_trainable_module():
 
     activations = {}
     trainable_module = nn.Linear(420, 69, bias=False).cuda()
-    model = FlexModel(
-        model,
-        activations,
-    )
+    model = FlexModel(model, activations,)
 
-    my_hook_function_1 = HookFunction(
-        MODULE_NAME_1,
-        expected_shape=(None, None, None),
-    )
-    my_hook_function_2 = HookFunction(
-        MODULE_NAME_2,
-        expected_shape=(None, None, None),
-    )
+    my_hook_function_1 = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None),)
+    my_hook_function_2 = HookFunction(MODULE_NAME_2, expected_shape=(None, None, None),)
 
     model.register_hook_function(my_hook_function_1)
     model.register_trainable_module("test", trainable_module)
@@ -112,10 +97,7 @@ def test_wrapped_module_requires_grad():
 
     activations = {}
     trainable_module = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
-    model = FlexModel(
-        model,
-        activations,
-    )
+    model = FlexModel(model, activations,)
     model.register_trainable_module("test", trainable_module)
 
     model.wrapped_module_requires_grad(True)
@@ -142,10 +124,7 @@ def test_trainable_modules_requires_grad():
     activations = {}
     trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
     trainable_module_2 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
-    model = FlexModel(
-        model,
-        activations,
-    )
+    model = FlexModel(model, activations,)
     model.register_trainable_module("test1", trainable_module_1)
     model.register_trainable_module("test2", trainable_module_2)
 
@@ -178,17 +157,11 @@ def test_destroy():
     activations = {}
     trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
     trainable_module_2 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
-    model = FlexModel(
-        model,
-        activations,
-    )
+    model = FlexModel(model, activations,)
     model.register_trainable_module("test1", trainable_module_1)
     model.register_trainable_module("test2", trainable_module_2)
 
-    my_hook_function = HookFunction(
-        MODULE_NAME_1,
-        expected_shape=(None, None, None),
-    )
+    my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None),)
 
     model.register_hook_function(my_hook_function)
     model.destroy()

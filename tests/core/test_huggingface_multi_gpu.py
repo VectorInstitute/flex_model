@@ -1,14 +1,13 @@
 import logging
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from accelerate import Accelerator
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from flex_model.core import FlexModel, HookFunction
 import flex_model.distributed as dist
+from flex_model.core import FlexModel, HookFunction
 from flex_model.utils import setup_logger
 from tests.test_utilities import Utils, make_model_and_tokenizer
-
 
 logger = logging.getLogger(__name__)
 
@@ -111,11 +110,7 @@ def test_huggingface_llama(hook_type: str = "forward"):
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(
-        prompts,
-        padding="max_length",
-        return_tensors="pt",
-    )[
+    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt",)[
         "input_ids"
     ].to(accelerator.device)
 
@@ -124,17 +119,11 @@ def test_huggingface_llama(hook_type: str = "forward"):
     model = accelerator.prepare(model)
 
     flex_model = FlexModel(
-        model,
-        multi_gpu_activations,
-        data_parallel_size=accelerator.num_processes,
+        model, multi_gpu_activations, data_parallel_size=accelerator.num_processes,
     )
     for module_name, expected_shape in LLAMA_MODULES_FSDP.items():
         flex_model.register_hook_function(
-            HookFunction(
-                module_name,
-                expected_shape,
-                hook_type=hook_type,
-            )
+            HookFunction(module_name, expected_shape, hook_type=hook_type,)
         )
 
     chunked_inputs = inputs.chunk(accelerator.num_processes, dim=0)
@@ -163,11 +152,7 @@ def test_huggingface_llama(hook_type: str = "forward"):
 
     for module_name, expected_shape in LLAMA_MODULES.items():
         flex_model.register_hook_function(
-            HookFunction(
-                module_name, 
-                expected_shape,
-                hook_type=hook_type,
-            )
+            HookFunction(module_name, expected_shape, hook_type=hook_type,)
         )
 
     for chunk in chunked_inputs:
@@ -179,8 +164,7 @@ def test_huggingface_llama(hook_type: str = "forward"):
     # Make sure activations are equal
     for k in single_gpu_activations.keys():
         assert torch.allclose(
-            all_single_gpu_activations[k],
-            multi_gpu_activations_[k],
+            all_single_gpu_activations[k], multi_gpu_activations_[k],
         ), (
             f"Failed: {k}, max diff: "
             f"{(all_single_gpu_activations[k] - multi_gpu_activations_[k]).abs().max()}"

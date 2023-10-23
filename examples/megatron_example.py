@@ -2,8 +2,8 @@ import argparse
 from typing import Dict
 
 import torch
-from torch import Tensor
 from llama import Llama
+from torch import Tensor
 
 from flex_model.core import FlexModel, HookFunction
 from flex_model.utils import setup_logger
@@ -61,11 +61,7 @@ def main(args):
     activation_dict: Dist[str, Tensor] = {}
 
     # Wrap model in FlexModel (llama-2-13b requires tensor parallel size 2)
-    model = FlexModel(
-        model,
-        activation_dict,
-        tensor_parallel_size=2,
-    )
+    model = FlexModel(model, activation_dict, tensor_parallel_size=2,)
 
     # Create a hook function
     module_name = "layers.28.feed_forward.w3"

@@ -1,26 +1,21 @@
 import logging
-from typing import Tuple
 import os
+from typing import Tuple
 
 import fairscale.nn.model_parallel as mpu
-from fairscale.nn.model_parallel.layers import (
-    VocabParallelEmbedding,
-    ParallelEmbedding,
-    ColumnParallelLinear,
-    RowParallelLinear,
-)
 import torch
-import torch.nn as nn
-from torch import Tensor
 import torch.distributed as dist
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    LlamaTokenizer,
+import torch.nn as nn
+from fairscale.nn.model_parallel.layers import (
+    ColumnParallelLinear,
+    ParallelEmbedding,
+    RowParallelLinear,
+    VocabParallelEmbedding,
 )
+from torch import Tensor
+from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaTokenizer
 
 import flex_model.distributed as fm_dist
-
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +38,13 @@ class Utils:
 
     @staticmethod
     def initialize_model_parallel(
-        tp: int = 1,
-        pp: int = 1,
-        dp: int = 1,
+        tp: int = 1, pp: int = 1, dp: int = 1,
     ):
         if not dist.is_initialized():
             Utils.initialize_distributed()
 
         mpu.initialize_model_parallel(
-            model_parallel_size_=tp,
-            pipeline_length=pp,
+            model_parallel_size_=tp, pipeline_length=pp,
         )
 
     @staticmethod
@@ -62,9 +54,7 @@ class Utils:
 
     @staticmethod
     def initialize_distributed_backend(
-        tp: int = 1,
-        pp: int = 1,
-        dp: int = 1,
+        tp: int = 1, pp: int = 1, dp: int = 1,
     ):
         if not dist.is_initialized():
             Utils.initialize_distributed()
@@ -94,8 +84,7 @@ def make_model_and_tokenizer() -> Tuple[nn.Module, LlamaTokenizer]:
         low_cpu_mem_usage=True,
     )
     tokenizer = AutoTokenizer.from_pretrained(
-        "/model-weights/Llama-2-13b-hf",
-        local_files_only=True,
+        "/model-weights/Llama-2-13b-hf", local_files_only=True,
     )
     tokenizer.pad_token_id = 0
     tokenizer.padding_side = "right"
@@ -124,10 +113,7 @@ def gather_weight(param: Tensor, dim: int):
 
 class MegatronLayers(nn.Module):
     def __init__(
-        self,
-        vocab_size,
-        sequence_length,
-        hidden_dim,
+        self, vocab_size, sequence_length, hidden_dim,
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -139,8 +125,7 @@ class MegatronLayers(nn.Module):
             self.vocab_size, self.hidden_dim
         ).cuda()
         full_vocab_embedding_weight = gather_weight(
-            self.vocab_parallel_embedding.weight.detach(),
-            dim=0,
+            self.vocab_parallel_embedding.weight.detach(), dim=0,
         )
         self.vocab_embedding = nn.Embedding(self.vocab_size, self.hidden_dim)
         self.vocab_embedding.weight = nn.Parameter(full_vocab_embedding_weight)
@@ -157,10 +142,7 @@ class MegatronLayers(nn.Module):
 
         # Column parallel linear and regular linear
         self.column_parallel_linear = ColumnParallelLinear(
-            self.hidden_dim,
-            self.hidden_dim,
-            bias=False,
-            gather_output=False,
+            self.hidden_dim, self.hidden_dim, bias=False, gather_output=False,
         ).cuda()
         full_col_linear_weight = gather_weight(
             self.column_parallel_linear.weight.detach(), dim=0
@@ -170,10 +152,7 @@ class MegatronLayers(nn.Module):
 
         # Row parallel linear and regular linear
         self.row_parallel_linear = RowParallelLinear(
-            self.hidden_dim,
-            self.hidden_dim,
-            bias=False,
-            input_is_parallel=True,
+            self.hidden_dim, self.hidden_dim, bias=False, input_is_parallel=True,
         ).cuda()
         full_row_linear_weight = gather_weight(
             self.row_parallel_linear.weight.detach(), dim=1
