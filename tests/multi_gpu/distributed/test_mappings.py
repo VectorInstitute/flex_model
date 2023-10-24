@@ -1,17 +1,19 @@
 import logging
 
 import fairscale.nn.model_parallel as mpu
+import pytest
 import torch
 import torch.distributed as dist
 
 import flex_model.distributed as fm_dist
 from flex_model.distributed.backends import GPUDeviceMesh
 from flex_model.utils import setup_logger
-from tests.test_utilities import Utils
+from tests.testing_utils import Utils
 
 logger = logging.getLogger(__name__)
 
 
+@pytest.mark.skip(reason="distributed")
 def test_broadcast_tensor_parallel():
     Utils.initialize_model_parallel(2, 1, 1)
     Utils.initialize_distributed_backend(2, 1, 1)
@@ -29,6 +31,7 @@ def test_broadcast_tensor_parallel():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_broadcast_data_parallel():
     Utils.initialize_model_parallel(1, 1, 2)
     Utils.initialize_distributed_backend(1, 1, 2)
@@ -46,6 +49,7 @@ def test_broadcast_data_parallel():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_all_gather_tensor_parallel():
     Utils.initialize_model_parallel(2, 1, 1)
     Utils.initialize_distributed_backend(2, 1, 1)
@@ -64,6 +68,7 @@ def test_all_gather_tensor_parallel():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_all_gather_data_parallel():
     Utils.initialize_model_parallel(1, 1, 2)
     Utils.initialize_distributed_backend(1, 1, 2)
@@ -82,6 +87,7 @@ def test_all_gather_data_parallel():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_scatter_tensor_parallel():
     Utils.initialize_model_parallel(2, 1, 1)
     Utils.initialize_distributed_backend(2, 1, 1)
@@ -100,6 +106,7 @@ def test_scatter_tensor_parallel():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_scatter_data_parallel():
     Utils.initialize_model_parallel(1, 1, 2)
     Utils.initialize_distributed_backend(1, 1, 2)
@@ -118,6 +125,7 @@ def test_scatter_data_parallel():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_batch_isend_irecv_pipeline_parallel():
     Utils.initialize_model_parallel(1, 2, 1)
     Utils.initialize_distributed_backend(1, 2, 1)
@@ -143,6 +151,7 @@ def test_batch_isend_irecv_pipeline_parallel():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_gather_pipeline_parallel_base():
     Utils.initialize_model_parallel(1, 2, 1)
     Utils.initialize_distributed_backend(1, 2, 1)
@@ -177,6 +186,7 @@ def test_gather_pipeline_parallel_base():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_gather_pipeline_parallel_dtypes():
     Utils.initialize_model_parallel(1, 2, 1)
     Utils.initialize_distributed_backend(1, 2, 1)
@@ -209,15 +219,3 @@ def test_gather_pipeline_parallel_dtypes():
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
     Utils.destroy_model_parallel()
-
-
-setup_logger("debug")
-test_broadcast_tensor_parallel()
-test_broadcast_data_parallel()
-test_all_gather_tensor_parallel()
-test_all_gather_data_parallel()
-test_scatter_tensor_parallel()
-test_scatter_data_parallel()
-test_batch_isend_irecv_pipeline_parallel()
-test_gather_pipeline_parallel_base()
-test_gather_pipeline_parallel_dtypes()

@@ -1,16 +1,31 @@
 from argparse import Namespace
-from functools import partial
+from functools import partial, reduce
 from typing import Dict
 
+import pytest
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+import tests.testing_utils as utils
 from flex_model.core import FlexModel, HookFunction
+from tests.fixtures import opt_350m, opt_tokenizer
 
 # could be any MLP layer and the code won't break. The test doesn't generalize
 # to other kinds of layers
-MODULE_NAME = "model.layers.27.mlp"
+MODULE_NAME = "model.decoder.layers.9.fc2"
+
+
+def rgetattr(module, attr):
+    def _getattr(module, attr):
+        return getattr(module, attr)
+
+    return reduce(_getattr, [module] + attr.split("."))
+
+
+def rsetattr(module, attr, val):
+    pre, _, post = attr.rpartition(".")
+    return setattr(rgetattr(module, pre) if pre else module, post, val)
 
 
 class LayerInjection(nn.Module):
@@ -38,11 +53,9 @@ class LayerInjection(nn.Module):
         return out
 
 
-def inject_module(injection_layer: nn.Module, model: nn.Module) -> None:
+def inject_module(injection_layer: nn.Module, model: nn.Module) -> nn.Module:
     """Replace <MODULE_NAME> in <model> with <injection_layer>"""
-    sliced = MODULE_NAME.split(".")
-    layer_num = int(sliced[2])
-    model.model.layers[layer_num].mlp = injection_layer
+    rsetattr(model, MODULE_NAME, injection_layer)
 
 
 def editing_func(
@@ -61,30 +74,17 @@ def editing_func(
     return inputs
 
 
-def make_model_and_tokenizer():
-    """Helper function to construct a llama-2 model and tokenizer."""
-    model = AutoModelForCausalLM.from_pretrained(
-        "/model-weights/Llama-2-13b-hf/",
-        local_files_only=True,
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(
-        "/model-weights/Llama-2-13b-hf/", local_files_only=True,
-    )
-    tokenizer.pad_token_id = 0
-    tokenizer.padding_side = "right"
-    tokenizer.model_max_length = 128
-
-    return model, tokenizer
+# Call fixture twice.
+opt_350m_gt = opt_350m
+opt_350m_hook = opt_350m
 
 
-def test_hook_function():
+def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer):
     """
     Tests if HookFunction implements a forward hook correctly
     """
-    model, tokenizer = make_model_and_tokenizer()
-    model.cuda().eval()  # disable dropout
+    model = opt_350m_gt.cuda().eval()
+    tokenizer = opt_tokenizer
 
     prompts = [
         "It's a nice day we're having",
@@ -93,20 +93,17 @@ def test_hook_function():
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt",)[
-        "input_ids"
-    ].cuda()
+    inputs = tokenizer(prompts, padding=True, return_tensors="pt",)["input_ids"].cuda()
 
     # first get our ground truth activations
-    inject_layer = LayerInjection(MODULE_NAME, model)
+    inject_layer = LayerInjection(MODULE_NAME, model).to(model.dtype).cuda()
     inject_module(inject_layer, model)
     model(inputs)
 
     ground_truth = inject_layer.modified_out.cpu()
 
     # now try with HookFunction API
-    model, tokenizer = make_model_and_tokenizer()
-    model.cuda().eval()
+    model = opt_350m_hook.cuda().eval()
 
     # ensure the layer injection is out
     for _, m in model.named_modules():
@@ -125,6 +122,3 @@ def test_hook_function():
     model(inputs, with_hooks=True)
 
     assert torch.equal(ground_truth, activations["modified"])
-
-
-test_hook_function()

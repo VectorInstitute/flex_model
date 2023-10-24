@@ -3,6 +3,7 @@ import os
 from typing import Tuple
 
 import fairscale.nn.model_parallel as mpu
+import pytest
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -20,9 +21,33 @@ import flex_model.distributed as fm_dist
 logger = logging.getLogger(__name__)
 
 
+def llama_13b() -> nn.Module:
+    """Helper function to construct a llama-2 model and tokenizer."""
+    model = AutoModelForCausalLM.from_pretrained(
+        "/model-weights/Llama-2-13b-hf",
+        local_files_only=True,
+        torch_dtype=torch.bfloat16,
+        low_cpu_mem_usage=True,
+    )
+
+    return model
+
+
+def llama_tokenizer() -> LlamaTokenizer:
+    tokenizer = AutoTokenizer.from_pretrained(
+        "/model-weights/Llama-2-13b-hf", local_files_only=True,
+    )
+    tokenizer.pad_token_id = 0
+    tokenizer.padding_side = "right"
+    tokenizer.model_max_length = 128
+
+    return tokenizer
+
+
 class Utils:
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
+    def __init__(self):
+        self.local_rank = int(os.environ["LOCAL_RANK"], 0)
+        torch.cuda.set_device(self.local_rank)
 
     @staticmethod
     def initialize_distributed():
@@ -73,24 +98,6 @@ class Utils:
     def destroy_activation_parallel():
         fm_dist.destroy_activation_parallel()
         dist.barrier()
-
-
-def make_model_and_tokenizer() -> Tuple[nn.Module, LlamaTokenizer]:
-    """Helper function to construct a llama-2 model and tokenizer."""
-    model = AutoModelForCausalLM.from_pretrained(
-        "/model-weights/Llama-2-13b-hf",
-        local_files_only=True,
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(
-        "/model-weights/Llama-2-13b-hf", local_files_only=True,
-    )
-    tokenizer.pad_token_id = 0
-    tokenizer.padding_side = "right"
-    tokenizer.model_max_length = 128
-
-    return model, tokenizer
 
 
 def gather_weight(param: Tensor, dim: int):

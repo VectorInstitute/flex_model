@@ -1,15 +1,17 @@
 import logging
 
+import pytest
 import torch
 import torch.distributed as dist
 
 from flex_model.core import FlexModel, HookFunction
 from flex_model.utils import setup_logger
-from tests.test_utilities import MegatronLayers, Utils
+from tests.testing_utils import MegatronLayers, Utils
 
 logger = logging.getLogger(__name__)
 
 
+@pytest.mark.skip(reason="distributed")
 def test_MegatronLayers():
     Utils.initialize_model_parallel()
 
@@ -32,6 +34,7 @@ def test_MegatronLayers():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_backward_hooks_megatron():
     Utils.initialize_model_parallel(2, 1, 2)
 
@@ -57,7 +60,6 @@ def test_backward_hooks_megatron():
         pipeline_parallel_size=1,
         data_parallel_size=2,
     )
-    print(model)
     hook_functions = {
         "column_parallel_linear": (None, None, hidden_dim),
         "col_linear": (None, None, None),
@@ -70,7 +72,7 @@ def test_backward_hooks_megatron():
     }
     for module_name, expected_shape in hook_functions.items():
         model.register_hook_function(
-            HookFunction(module_name, expected_shape, hook_type="backward",)
+            HookFunction(module_name, expected_shape, hook_type="backward")
         )
 
     parallel_out, regular_out = model(inputs)
@@ -92,6 +94,7 @@ def test_backward_hooks_megatron():
     Utils.destroy_model_parallel()
 
 
+@pytest.mark.skip(reason="distributed")
 def test_forward_hooks_megatron():
     Utils.initialize_model_parallel(2, 1, 2)
 
@@ -117,7 +120,6 @@ def test_forward_hooks_megatron():
         pipeline_parallel_size=1,
         data_parallel_size=2,
     )
-    print(model)
     hook_functions = {
         "vocab_parallel_embedding": (None, None, hidden_dim),
         "vocab_embedding": (None, None, None),
@@ -153,8 +155,3 @@ def test_forward_hooks_megatron():
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
     Utils.destroy_model_parallel()
-
-
-test_MegatronLayers()
-test_forward_hooks_megatron()
-test_backward_hooks_megatron()

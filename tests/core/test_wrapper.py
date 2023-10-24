@@ -1,13 +1,17 @@
 from argparse import Namespace
+from functools import partial
 
+import pytest
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+import tests.testing_utils as utils
 from flex_model.core import FlexModel, HookFunction
+from tests.fixtures import opt_350m, opt_tokenizer
 
-MODULE_NAME_1 = "model.layers.27.mlp"
-MODULE_NAME_2 = "model.layers.28.mlp"
+MODULE_NAME_1 = "model.decoder.layers.17.fc2"
+MODULE_NAME_2 = "model.decoder.layers.18.fc2"
 PROMPTS = [
     "It's a nice day we're having",
     "The capital of Canada is",
@@ -16,37 +20,12 @@ PROMPTS = [
 ]
 
 
-def make_tokenizer():
-    """Helper function to construct a llama-2 tokenizer."""
-    tokenizer = AutoTokenizer.from_pretrained(
-        "/model-weights/Llama-2-13b-hf/", local_files_only=True,
-    )
-    tokenizer.pad_token_id = 0
-    tokenizer.padding_side = "right"
-    tokenizer.model_max_length = 128
-
-    return tokenizer
-
-
-def make_model():
-    """Helper function to construct a llama-2 model."""
-    model = AutoModelForCausalLM.from_pretrained(
-        "/model-weights/Llama-2-13b-hf/",
-        local_files_only=True,
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-    )
-
-    return model
-
-
-def test_register_hook_function():
+def test_register_hook_function(opt_350m):
     """
     Tests if a hook function is registered correctly, and if the fields are set
     appropriately.
     """
-    model = make_model()
-    model.cuda()
+    model = opt_350m.cuda()
 
     activations = {}
     model = FlexModel(model, activations,)
@@ -61,14 +40,13 @@ def test_register_hook_function():
     assert model.hook_functions[MODULE_NAME_1] is my_hook_function
 
 
-def test_register_trainable_module():
+def test_register_trainable_module(opt_350m):
     """
     Tests if a trainable module is registered correctly, and that all hook
     functions (regardless of when they're added), have a pointer to this
     module.
     """
-    model = make_model()
-    model.cuda()
+    model = opt_350m.cuda()
 
     activations = {}
     trainable_module = nn.Linear(420, 69, bias=False).cuda()
@@ -87,13 +65,12 @@ def test_register_trainable_module():
     assert my_hook_function_2.modules["test"] is trainable_module
 
 
-def test_wrapped_module_requires_grad():
+def test_wrapped_module_requires_grad(opt_350m):
     """
     Test whether all parameters in the wrapped module do/don't require grad
     upon calling this method.
     """
-    model = make_model()
-    model.cuda
+    model = opt_350m.cuda()
 
     activations = {}
     trainable_module = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
@@ -113,13 +90,12 @@ def test_wrapped_module_requires_grad():
             assert p.requires_grad is True
 
 
-def test_trainable_modules_requires_grad():
+def test_trainable_modules_requires_grad(opt_350m):
     """
     Test to ensure *only* the added trainable module is affected by upon
     calling this method.
     """
-    model = make_model()
-    model.cuda
+    model = opt_350m.cuda()
 
     activations = {}
     trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
@@ -147,12 +123,11 @@ def test_trainable_modules_requires_grad():
         assert p.requires_grad is True
 
 
-def test_destroy():
+def test_destroy(opt_350m):
     """
     Tests the destroy method to ensure everything is cleared appropriately.
     """
-    model = make_model()
-    model.cuda
+    model = opt_350m.cuda()
 
     activations = {}
     trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
@@ -174,8 +149,51 @@ def test_destroy():
     assert model.save_ctx == Namespace()
 
 
-test_register_hook_function()
-test_register_trainable_module()
-test_wrapped_module_requires_grad()
-test_trainable_modules_requires_grad()
-test_destroy()
+def test_save_ctx(opt_350m, opt_tokenizer):
+    model = opt_350m.cuda()
+
+    tokenizer = opt_tokenizer
+
+    activations = {}
+    model = FlexModel(model, activations)
+
+    prompts = [
+        "It's a nice day we're having",
+        "The capital of Canada is",
+        "What should I eat for dinner tonight?",
+        "There's about three people going to",
+    ]
+
+    inputs = tokenizer(prompts, padding=True, return_tensors="pt",)["input_ids"].cuda()
+
+    # Function to save an activation tensor for later use. The same activation
+    # tensor is also saved into the `activations` dict we passed initially to
+    # the `FlexModel.__init__()`. Hence we can verify that the `save_ctx` and
+    # `activations` dict versions of the same tensor are indeed `torch.equal`.
+    def retrieve_fn(current_module, inputs, save_ctx, modules):
+        # Detach activation tensor and dump to cpu
+        save_ctx.activation = inputs.detach().cpu()
+        return inputs
+
+    # Function to verify we still have access to the saved tensor
+    def verify_fn(current_module, inputs, save_ctx, modules, act_dict):
+        act_dict["save_ctx_activation"] = save_ctx.activation
+        return inputs
+
+    retrieve_hook_fn = HookFunction(
+        "model.decoder.layers.12", (None, None, None), retrieve_fn,
+    )
+    verify_hook_fn = HookFunction(
+        "model.decoder.layers.18",
+        (None, None, None),
+        partial(verify_fn, act_dict=activations),
+    )
+    model.register_hook_function(retrieve_hook_fn)
+    model.register_hook_function(verify_hook_fn)
+
+    _ = model(inputs)
+
+    # Verify that the two verions of the same tensor are equal
+    assert torch.equal(
+        activations["save_ctx_activation"], activations["model.decoder.layers.12"],
+    )
