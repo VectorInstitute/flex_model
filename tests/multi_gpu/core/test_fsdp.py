@@ -6,9 +6,10 @@ from accelerate import Accelerator
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import flex_model.distributed as dist
-import tests.testing_utils as utils
+import tests.multi_gpu.testing_utils as utils
 from flex_model.core import FlexModel, HookFunction
 from flex_model.utils import setup_logger
+from tests.multi_gpu.registry import register_multigpu_test
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +95,13 @@ LLAMA_MODULES_FSDP = {
 }
 
 
-@pytest.mark.skip(reason="distributed")
+@register_multigpu_test
 def test_huggingface_llama(hook_type: str = "forward"):
     """
     Make sure an accelerate-FSDP model gives the same output as a model
     running on one gpu. The single-gpu model will process one batch at a time.
     """
+    # TODO: Migrate this from huggingface accelerate to torch fsdp.
     accelerator = Accelerator()
 
     model = utils.llama_13b()

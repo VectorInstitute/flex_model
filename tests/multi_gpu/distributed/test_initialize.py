@@ -1,10 +1,15 @@
 import pytest
 
 import flex_model.distributed as fm_dist
-from tests.testing_utils import Utils
+from tests.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
+from tests.multi_gpu.testing_utils import Utils
+
+register_initialize_test, get_initialize_test = make_test_registry(
+    "initialize", SlurmJobResourceSpec(),
+)
 
 
-@pytest.mark.skip(reason="distributed")
+@register_initialize_test
 def test_initialize_and_destroy_activation_parallel():
     Utils.initialize_distributed()
     Utils.initialize_model_parallel(2, 1, 2)

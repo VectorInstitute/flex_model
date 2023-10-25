@@ -45,13 +45,14 @@ def llama_tokenizer() -> LlamaTokenizer:
 
 
 class Utils:
-    def __init__(self):
-        self.local_rank = int(os.environ["LOCAL_RANK"], 0)
-        torch.cuda.set_device(self.local_rank)
-
     @staticmethod
     def initialize_distributed():
         dist.init_process_group(backend="nccl")
+
+        # Set current device for future calls to `.cuda()`.
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(local_rank)
+
         print(
             f"Rank{dist.get_rank()}/{dist.get_world_size()}: "
             f"Distributed initialized"
@@ -103,7 +104,7 @@ class Utils:
 def gather_weight(param: Tensor, dim: int):
     mp_group = mpu.get_model_parallel_group()
 
-    if dist.get_world_size() == 1:
+    if mpu.get_model_parallel_world_size() == 1:
         return param
 
     tensor_list = [
@@ -113,12 +114,12 @@ def gather_weight(param: Tensor, dim: int):
 
     dist.all_gather(tensor_list, param, mp_group)
 
-    output = torch.cat(tensor_list, dim=dim).contiguous()
+    output = torch.cat(tensor_list, dim=dim)
 
     return output
 
 
-class MegatronLayers(nn.Module):
+class FairscaleLayers(nn.Module):
     def __init__(
         self, vocab_size, sequence_length, hidden_dim,
     ):
@@ -131,20 +132,26 @@ class MegatronLayers(nn.Module):
         self.vocab_parallel_embedding = VocabParallelEmbedding(
             self.vocab_size, self.hidden_dim
         ).cuda()
+
         full_vocab_embedding_weight = gather_weight(
             self.vocab_parallel_embedding.weight.detach(), dim=0,
         )
+
         self.vocab_embedding = nn.Embedding(self.vocab_size, self.hidden_dim)
+
         self.vocab_embedding.weight = nn.Parameter(full_vocab_embedding_weight)
 
         # Parallel embedding and regular embedding
         self.parallel_embedding = ParallelEmbedding(
             self.vocab_size, self.hidden_dim
         ).cuda()
+
         full_embedding_weight = gather_weight(
             self.parallel_embedding.weight.detach(), dim=1
         )
+
         self.embedding = nn.Embedding(self.vocab_size, self.hidden_dim)
+
         self.embedding.weight = nn.Parameter(full_embedding_weight)
 
         # Column parallel linear and regular linear

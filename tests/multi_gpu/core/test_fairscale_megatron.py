@@ -6,13 +6,19 @@ import torch.distributed as dist
 
 from flex_model.core import FlexModel, HookFunction
 from flex_model.utils import setup_logger
-from tests.testing_utils import MegatronLayers, Utils
+from tests.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
+from tests.multi_gpu.testing_utils import FairscaleLayers, Utils
 
 logger = logging.getLogger(__name__)
 
 
-@pytest.mark.skip(reason="distributed")
-def test_MegatronLayers():
+register_fairscale_megatron_test, get_fairscale_megatron_test = make_test_registry(
+    "fairscale_megatron", SlurmJobResourceSpec(),
+)
+
+
+@register_fairscale_megatron_test
+def test_FairscaleLayers():
     Utils.initialize_model_parallel()
 
     torch.manual_seed(42069)
@@ -27,15 +33,15 @@ def test_MegatronLayers():
     ).cuda()
     logger.debug(inputs)
 
-    model = MegatronLayers(vocab_size, sequence_length, hidden_dim)
+    model = FairscaleLayers(vocab_size, sequence_length, hidden_dim)
 
     parallel_out, regular_out = model(inputs)
     assert torch.allclose(parallel_out, regular_out, atol=1e-7)
     Utils.destroy_model_parallel()
 
 
-@pytest.mark.skip(reason="distributed")
-def test_backward_hooks_megatron():
+@register_fairscale_megatron_test
+def test_backward_hooks_FairscaleLayers():
     Utils.initialize_model_parallel(2, 1, 2)
 
     torch.manual_seed(42069)
@@ -50,7 +56,7 @@ def test_backward_hooks_megatron():
     ).cuda()
     logger.debug(inputs)
 
-    model = MegatronLayers(vocab_size, sequence_length, hidden_dim)
+    model = FairscaleLayers(vocab_size, sequence_length, hidden_dim)
 
     output_dict = {}
     model = FlexModel(
@@ -94,8 +100,8 @@ def test_backward_hooks_megatron():
     Utils.destroy_model_parallel()
 
 
-@pytest.mark.skip(reason="distributed")
-def test_forward_hooks_megatron():
+@register_fairscale_megatron_test
+def test_forward_hooks_FairscaleLayers():
     Utils.initialize_model_parallel(2, 1, 2)
 
     torch.manual_seed(42069)
@@ -110,7 +116,7 @@ def test_forward_hooks_megatron():
     ).cuda()
     logger.debug(inputs)
 
-    model = MegatronLayers(vocab_size, sequence_length, hidden_dim)
+    model = FairscaleLayers(vocab_size, sequence_length, hidden_dim)
 
     output_dict = {}
     model = FlexModel(

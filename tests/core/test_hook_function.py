@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-import tests.testing_utils as utils
 from flex_model.core import FlexModel, HookFunction
 from tests.fixtures import opt_350m, opt_tokenizer
 
