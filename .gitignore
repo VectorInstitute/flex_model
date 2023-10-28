@@ -8,9 +8,12 @@ __pycache__/
 
 *.egg-info/
 
+# Stubs
 llama/
 *.logits
 transformers/
+wandb/
+Megatron-LM/
 
 docs/build/
 docs/source/generated
