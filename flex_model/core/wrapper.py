@@ -440,6 +440,8 @@ class FlexModel(nn.Module):
         and distributed backend/groups.
         """
         self.hook_functions.clear()
+        for handle in self._hook_function_handles.values():
+            handle.remove()
         self._hook_function_handles.clear()
         self._hooks_active = False
         self.save_ctx = Namespace()

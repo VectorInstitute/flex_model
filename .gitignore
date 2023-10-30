@@ -8,7 +8,7 @@ __pycache__/
 
 *.egg-info/
 
-# Stubs
+# Stubs and logs
 llama/
 *.logits
 transformers/
@@ -19,7 +19,11 @@ profiles/
 =======
 wandb/
 Megatron-LM/
+<<<<<<< HEAD
 >>>>>>> formatting
+=======
+profiles/
+>>>>>>> added pytorch profiler support for perf experiments
 
 docs/build/
 docs/source/generated

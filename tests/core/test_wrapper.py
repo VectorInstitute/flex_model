@@ -138,14 +138,21 @@ def test_destroy(opt_350m):
     my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None),)
 
     model.register_hook_function(my_hook_function)
-    model.destroy()
+    model = model.destroy()
 
-    assert model.hook_functions == {}
-    assert model._hook_function_handles == {}
-    assert model._hooks_active is False
-    assert model.output_ptr is activations
-    assert len(model.trainable_modules) == 0
-    assert model.save_ctx == Namespace()
+    assert not isinstance(model, FlexModel)
+    assert not getattr(model, "hook_functions", False)
+    assert not getattr(model, "_hook_function_handles", False)
+    assert not getattr(model, "_hooks_active", False)
+    assert not getattr(model, "output_ptr", False)
+    assert not getattr(model, "save_ctx", False)
+    assert not getattr(model, "trainable_modules", False)
+
+    hook_types = {"_forward", "_forward_pre", "_backward"}
+    for m in model.modules():
+        for hook_type in hook_types:
+            attr = hook_type + "_hooks"
+            assert len(getattr(m, attr)) == 0
 
 
 def test_save_ctx(opt_350m, opt_tokenizer):
