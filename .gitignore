@@ -8,12 +8,18 @@ __pycache__/
 
 *.egg-info/
 
+# Stubs
 llama/
 *.logits
 transformers/
+<<<<<<< HEAD
 Megatron-LM/
 wandb/
 profiles/
+=======
+wandb/
+Megatron-LM/
+>>>>>>> formatting
 
 docs/build/
 docs/source/generated
