@@ -1,39 +1,21 @@
 import argparse
+import glob
 import os
 import random
 from collections import defaultdict
+from dataclasses import dataclass
 
-import megatron.core.parallel_state as mpu
 import numpy as np
 import torch
 import torch.nn as nn
-import wandb
-from megatron.core.parallel_state import initialize_model_parallel
-from megatron.core.tensor_parallel import model_parallel_cuda_manual_seed
+from torch.profiler import ProfilerActivity
 
 from examples.perf_testing.utils import (
-    Benchmark,
-    ExperimentNetworkFactory,
-    initialize_distributed,
+    ExperimentNetworkManager,
+    init_megatron_dist,
     spoof_megatron_config,
 )
-
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--steps", type=int, default=100)
-    parser.add_argument("--warmup_iters", type=int, default=20)
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--profile", action="store_true")
-    parser.add_argument("--profile_dtype", type=str, default="fp32")
-    parser.add_argument("--profile_model_dim", type=int, default=4096)
-    parser.add_argument("--profile_n_layers", type=int, default=4)
-    parser.add_argument("--profile_exp", type=str, default="single_gpu_no_hooks")
-    parser.add_argument("--wandb", action="store_true")
-    parser.add_argument("--debug", action="store_true")
-    args = parser.parse_args()
-    return args
-
+from flex_model.utils import setup_logger
 
 DTYPES = {
     "fp32": torch.float32,
@@ -42,110 +24,179 @@ DTYPES = {
 }
 
 
-def profile(args):
-    factory = ExperimentNetworkFactory(args.profile_model_dim, args.profile_n_layers,)
-    experiments = factory.named_experiments
-    assert args.profile_exp in experiments
-
-    dtype = DTYPES[args.dtype]
-    network = getattr(factory, args.profile_exp)()
-    network.to(dtype).cuda()
-
-    inputs = torch.randn(1, args.batch_size, args.profile_model_dim, dtype=dtype).cuda()
-    benchmark = Benchmark(network, inputs)
-
-    profile = benchmark.run_profile()
-
-    # TODO: Investigate best way to display profile.
+def _add_profile_args(parser):
+    group = parser.add_argument_group("profile")
+    group.add_argument("--profile", action="store_true")
+    group.add_argument("--profile_show", action="store_true")
+    group.add_argument("--profile_warmup_steps", type=int, default=2)
+    group.add_argument("--profile_active_steps", type=int, default=10)
+    group.add_argument("--profile_wait_steps", type=int, default=1)
+    group.add_argument("--profile_dir", type=str)
+    group.add_argument("--profile_row_limit", type=int, default=5)
+    return parser
 
 
-def init_megatron_dist():
-    os.environ["NCCL_IB_DISABLE"] = "1"
-    initialize_distributed()
-    initialize_model_parallel(torch.distributed.get_world_size())
+def _add_distributed_args(parser):
+    group = parser.add_argument_group("distributed")
+    group.add_argument("--tp_size", type=int)
+    # parser.add_argument("--dp_size", type=int)
+    # parser.add_argument("--pp_size", type=int)
+    return parser
 
-    # Taken from: https://github.com/NVIDIA/Megatron-LM/blob/feac76a79148622d8f2a45d46c08a972a24784a3/megatron/initialize.py#L236
-    seed = 0
-    seed += 100 * mpu.get_pipeline_model_parallel_rank()
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.device_count() > 0:
-        model_parallel_cuda_manual_seed(0)
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch_size", type=int, default=4096)
+    parser.add_argument("--dtypes", type=str, help="Comma-separated dtypes")
+    parser.add_argument("--model_dim", type=int)
+    parser.add_argument("--log_level", type=str, default="warning")
+    parser.add_argument("--single_gpu_only", action="store_true")
+    parser.add_argument("--multi_gpu_only", action="store_true")
+    parser.add_argument("--n_layers", type=int, default=32)
+    parser.add_argument("--debug", action="store_true")
+
+    parser = _add_profile_args(parser)
+    parser = _add_distributed_args(parser)
+
+    args = parser.parse_args()
+
+    args = validate_args(args)
+
+    print_args(args)
+
+    return args
+
+
+def validate_args(args):
+    # Manual override for one dtype.
+    if args.dtypes is not None and args.dtypes in DTYPES:
+        dtypes = []
+        for d in args.dtypes.split(","):
+            if d in DTYPES:
+                dtypes.append(DTYPES[d])
+            else:
+                raise Exception(f"Unsupported dtype provided: {d}")
+        args.dtype_sweep = dtypes
+    else:
+        args.dtype_sweep = list(DTYPES.values())
+
+    # Manual override for one model dim.
+    if args.model_dim is not None:
+        args.model_dim_sweep = [args.model_dim]
+    else:
+        args.model_dim_sweep = [2 ** i for i in range(9, 15)]
+
+    # Debug overrides both dtype and model dim to test all configurations.
+    if args.debug:
+        args.dtype_sweep = [v for v in DTYPES.values()]
+        args.model_dim_sweep = [16, 32]
+
+    # Determine which experiments to run.
+    assert not (
+        args.single_gpu_only and args.multi_gpu_only
+    ), f"Cannot have both single gpu and multi gpu only flags both True."
+
+    # TP is across all gpus by default.
+    if args.tp_size is None:
+        args.tp_size = int(os.environ["WORLD_SIZE"])
+
+    # Make folder for profiling.
+    if args.profile_dir is None:
+        args.profile_dir = f"{os.getcwd()}/profiles/{os.environ['SLURM_JOB_ID']}"
+    if not os.path.isdir(args.profile_dir):
+        os.makedirs(args.profile_dir, exist_ok=True)
+
+    return args
+
+
+def print_args(args):
+    # TODO: Pretty print.
+    print(args)
 
 
 def main(args):
-    init_megatron_dist()
+    setup_logger(args.log_level)
+
+    # Silence kineto warnings.
+    os.environ["KINETO_LOG_LEVEL"] = "5"
+
+    init_megatron_dist(args)
     rank = torch.distributed.get_rank()
 
-    if args.profile:
-        profile(args)
-        return
-
-    if args.debug:
-        sweep_vars = {
-            "dtype": [v for v in DTYPES.values()],
-            "model_dim": [2 ** 5],
-        }
-
-    else:
-        sweep_vars = {
-            "dtype": [v for v in DTYPES.values()],
-            "model_dim": [2 ** i for i in range(9, 15)],
-        }
-    metric_var_names = ["iter_time"]
-
-    # Construct wandb metrics.
-    if args.wandb and rank == 0:
-        wandb.init(project="flex_model_exps", config={})
-        wandb.define_metric("model_dim")
-
-    # Construct experiment parameters for sweeps.
-    exps = []
-    for dtype in sweep_vars["dtype"]:
-        for model_dim in sweep_vars["model_dim"]:
-            exps.append((dtype, model_dim))
+    # Construct experiment setup functions.
+    manager = ExperimentNetworkManager()
+    experiments = manager.named_experiments
+    prefix = ""
+    if args.single_gpu_only:
+        prefix = "single_gpu"
+    elif args.multi_gpu_only:
+        prefix = "multi_gpu"
+    experiments = [getattr(manager, e) for e in experiments if e.startswith(prefix)]
 
     # Run benchmarks for each experiment, sweeping over parameters.
-    factory = ExperimentNetworkFactory()
-    for exp_name in factory.named_experiments:
-        for dtype in sweep_vars["dtype"]:
-            if args.wandb and rank == 0:
-                wandb.define_metric(
-                    f"{exp_name}_{dtype}_iter_time", step_metric="model_dim"
-                )
-            for model_dim in sweep_vars["model_dim"]:
+    for model_dim in args.model_dim_sweep:
+        for dtype in args.dtype_sweep:
+            for exp in experiments:
+                exp_name = exp.__name__
+
+                # Setup network.
                 spoof_config = spoof_megatron_config(dtype)
-
-                # Get the network using current experiment params.
-                network = getattr(factory, exp_name)(
-                    model_dim=model_dim,
-                    n_layers=32,  # TODO make this a sweep too.
-                    config=spoof_config,
-                )
-                network.to(dtype).cuda()
-
-                # Benchmark.
-                inputs = torch.randn(
-                    args.steps, args.batch_size, model_dim, dtype=dtype
+                network = exp(
+                    model_dim=model_dim, n_layers=args.n_layers, config=spoof_config,
                 ).cuda()
-                benchmark = Benchmark(network, inputs, warmup_iters=args.warmup_iters,)
 
-                iter_time = benchmark.run_exp(args.steps)
+                # Setup inputs.
+                num_steps = (
+                    args.profile_wait_steps
+                    * args.profile_warmup_steps
+                    * args.profile_active_steps
+                )
+                inputs = torch.randn(
+                    num_steps, args.batch_size, model_dim, dtype=dtype
+                ).cuda()
 
-                # Log benchmark results.
-                if rank == 0:
-                    print(f"{exp_name}_{model_dim}_{dtype}: {round(iter_time, 6)}s")
-                    if args.wandb:
-                        wandb.log(
-                            {
-                                "model_dim": model_dim,
-                                f"{exp_name}_{dtype}_iter_time": iter_time,
-                            }
+                # Run benchmark.
+                schedule = torch.profiler.schedule(
+                    wait=args.profile_wait_steps,
+                    warmup=args.profile_warmup_steps,
+                    active=args.profile_active_steps,
+                    repeat=1,
+                )
+                with torch.profiler.profile(
+                    schedule=schedule,
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    record_shapes=True,
+                    with_flops=True,
+                    profile_memory=True,
+                    on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                        args.profile_dir
+                    ),
+                ) as prof:
+                    for i in range(num_steps):
+                        network(inputs[i])
+                        prof.step()
+
+                # Print profiles.
+                if args.profile_show and rank == 0:
+                    sort_variables = [
+                        "self_cpu_time_total",
+                        "self_cuda_time_total",
+                        "self_cpu_memory_usage",
+                        "self_cuda_memory_usage",
+                    ]
+                    print(" -> ".join(sort_variables))
+                    key_avgs = prof.key_averages(group_by_input_shape=True)
+                    print("=" * 160)
+                    print(f"{exp_name}_{model_dim}_{dtype}")
+                    for sort_var in sort_variables:
+                        print(
+                            key_avgs.table(
+                                sort_by=sort_var, row_limit=args.profile_row_limit,
+                            )
                         )
 
                 # Cleanup.
-                factory.clear()
+                manager.cleanup()
 
 
 if __name__ == "__main__":
