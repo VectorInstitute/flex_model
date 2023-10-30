@@ -19,3 +19,4 @@ docs/source/generated
 *.err
 *.out
 *.slrm
+*_logs/
