@@ -1,6 +1,7 @@
 import argparse
 import glob
 import os
+import pprint
 import random
 from collections import defaultdict
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ def _add_profile_args(parser):
 def _add_distributed_args(parser):
     group = parser.add_argument_group("distributed")
     group.add_argument("--tp_size", type=int)
+    # TODO: Full Megatron-LM port.
     # parser.add_argument("--dp_size", type=int)
     # parser.add_argument("--pp_size", type=int)
     return parser
@@ -61,8 +63,6 @@ def parse_args():
     args = parser.parse_args()
 
     args = validate_args(args)
-
-    print_args(args)
 
     return args
 
@@ -110,8 +110,8 @@ def validate_args(args):
 
 
 def print_args(args):
-    # TODO: Pretty print.
-    print(args)
+    pp = pprint.PrettyPrinter(width=80)
+    pp.pprint(vars(args))
 
 
 def main(args):
@@ -122,6 +122,8 @@ def main(args):
 
     init_megatron_dist(args)
     rank = torch.distributed.get_rank()
+    if rank == 0:
+        print_args(args)
 
     # Construct experiment setup functions.
     manager = ExperimentNetworkManager()

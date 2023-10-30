@@ -12,18 +12,9 @@ __pycache__/
 llama/
 *.logits
 transformers/
-<<<<<<< HEAD
 Megatron-LM/
 wandb/
 profiles/
-=======
-wandb/
-Megatron-LM/
-<<<<<<< HEAD
->>>>>>> formatting
-=======
-profiles/
->>>>>>> added pytorch profiler support for perf experiments
 
 docs/build/
 docs/source/generated
