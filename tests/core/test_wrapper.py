@@ -29,7 +29,7 @@ def test_register_hook_function(opt_350m):
     activations = {}
     model = FlexModel(model, activations,)
 
-    my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None),)
+    my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None))
 
     model.register_hook_function(my_hook_function)
 
@@ -49,10 +49,10 @@ def test_register_trainable_module(opt_350m):
 
     activations = {}
     trainable_module = nn.Linear(420, 69, bias=False).cuda()
-    model = FlexModel(model, activations,)
+    model = FlexModel(model, activations)
 
-    my_hook_function_1 = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None),)
-    my_hook_function_2 = HookFunction(MODULE_NAME_2, expected_shape=(None, None, None),)
+    my_hook_function_1 = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None))
+    my_hook_function_2 = HookFunction(MODULE_NAME_2, expected_shape=(None, None, None))
 
     model.register_hook_function(my_hook_function_1)
     model.register_trainable_module("test", trainable_module)
@@ -163,7 +163,7 @@ def test_save_ctx(opt_350m, opt_tokenizer):
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(prompts, padding=True, return_tensors="pt",)["input_ids"].cuda()
+    inputs = tokenizer(prompts, padding=True, return_tensors="pt")["input_ids"].cuda()
 
     # Function to save an activation tensor for later use. The same activation
     # tensor is also saved into the `activations` dict we passed initially to
