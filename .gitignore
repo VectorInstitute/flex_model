@@ -11,6 +11,8 @@ __pycache__/
 # Stubs and logs
 llama/
 *.logits
+*.log
+.ipynb_checkpoints/
 transformers/
 Megatron-LM/
 wandb/

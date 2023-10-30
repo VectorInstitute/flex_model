@@ -102,7 +102,9 @@ def validate_args(args):
 
     # Make folder for profiling.
     if args.profile_dir is None:
-        args.profile_dir = f"{os.getcwd()}/profiles/{os.environ['SLURM_JOB_ID']}"
+        args.profile_dir = (
+            f"{os.getcwd()}/profiles/profile_{os.environ['SLURM_JOB_ID']}"
+        )
     if not os.path.isdir(args.profile_dir):
         os.makedirs(args.profile_dir, exist_ok=True)
 
@@ -120,20 +122,25 @@ def main(args):
     # Silence kineto warnings.
     os.environ["KINETO_LOG_LEVEL"] = "5"
 
+    # Initialize distributed and megatron-lm parallel state.
     init_megatron_dist(args)
     rank = torch.distributed.get_rank()
     if rank == 0:
         print_args(args)
 
-    # Construct experiment setup functions.
+    # Construct experiment setup functions and create profile folders.
     manager = ExperimentNetworkManager()
     experiments = manager.named_experiments
+
     prefix = ""
     if args.single_gpu_only:
         prefix = "single_gpu"
     elif args.multi_gpu_only:
         prefix = "multi_gpu"
     experiments = [getattr(manager, e) for e in experiments if e.startswith(prefix)]
+
+    for exp in experiments:
+        os.makedirs(f"{args.profile_dir}/{exp.__name__}", exist_ok=True)
 
     # Run benchmarks for each experiment, sweeping over parameters.
     for model_dim in args.model_dim_sweep:
@@ -171,7 +178,7 @@ def main(args):
                     with_flops=True,
                     profile_memory=True,
                     on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                        args.profile_dir
+                        f"{args.profile_dir}/{exp_name}"
                     ),
                 ) as prof:
                     for i in range(num_steps):
@@ -186,10 +193,10 @@ def main(args):
                         "self_cpu_memory_usage",
                         "self_cuda_memory_usage",
                     ]
-                    print(" -> ".join(sort_variables))
                     key_avgs = prof.key_averages(group_by_input_shape=True)
                     print("=" * 160)
                     print(f"{exp_name}_{model_dim}_{dtype}")
+                    print(" -> ".join(sort_variables))
                     for sort_var in sort_variables:
                         print(
                             key_avgs.table(
