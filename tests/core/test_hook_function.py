@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+import tests.testing_utils as utils
 from flex_model.core import FlexModel, HookFunction
 from tests.fixtures import opt_350m, opt_tokenizer
 
@@ -52,7 +53,7 @@ class LayerInjection(nn.Module):
         return out
 
 
-def inject_module(injection_layer: nn.Module, model: nn.Module) -> None:
+def inject_module(injection_layer: nn.Module, model: nn.Module) -> nn.Module:
     """Replace <MODULE_NAME> in <model> with <injection_layer>"""
     rsetattr(model, MODULE_NAME, injection_layer)
 
