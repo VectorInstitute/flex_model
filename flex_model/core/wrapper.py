@@ -32,6 +32,127 @@ from .hook_function import HookFunction
 logger = logging.getLogger(__name__)
 
 
+class PinnedBuffers:
+    def __init__(
+        self,
+        output_ptr: Dict[str, Tensor],
+        expansion_scale: int = 1,
+        bucket_size: int = 1,
+    ) -> None:
+        self.output_ptr = output_ptr
+        self.expansion_scale = expansion_scale
+        self.bucket_size = bucket_size
+
+        # Need to expand buffer at runtime, don't know at FlexModel init time
+        # what activation sizes will be retrieved.
+        self.dtypes = {torch.float32, torch.float16, torch.bfloat16}
+
+        self.pinned_buffers = {}
+        self.tensor_meta = {}
+        for dtype in self.dtypes:
+            self.pinned_buffers[dtype] = torch.empty((1,), dtype=dtype).pin_memory()
+            self.tensor_meta[dtype] = {}
+
+        self.pad_start = 0
+        logger.debug(
+            f"PinnedBuffers init: bucket_size = {self.bucket_size}, "
+            f"expansion_scale = {self.expansion_scale}"
+        )
+
+    def _buffer_overflow(self, new_n_elements, dtype) -> None:
+        original_size = self.pinned_buffers[dtype].numel()
+        if original_size == 1:  # First fault should allocate cleanly.
+            original_size = 0
+
+        new_size = new_n_elements * self.expansion_scale + original_size
+
+        # Perf NOTE: Need to re-allocate pinned memory since `.resize_()`
+        #            doesn't work with pinned memory tensors. Can investigate
+        #            smart ways to figure out how to statically allocate this.
+        new_buf = torch.empty((new_size,), dtype=dtype).pin_memory()
+
+        self.pinned_buffers[dtype] = new_buf
+        logger.debug(f"PinnedBuffer buffer_overflow: {dtype} -> {new_size}")
+
+    def _host_pinned_to_pageable(self, dtype: torch.dtype):
+        """Dump all contents of a buffer for the given dtype into pageable."""
+        # Bucket filled, allocate and dump to CPU pageable.
+        for name, meta in self.tensor_meta[dtype].items():
+            shape = meta["shape"]
+            buf_start, buf_end = meta["buf_start"], meta["buf_end"]
+            buffer_view = self.pinned_buffers[dtype][buf_start:buf_end]
+
+            pageable_tensor = torch.empty((buf_end - buf_start,), dtype=dtype)
+            pageable_tensor.copy_(buffer_view)
+            pageable_tensor = pageable_tensor.reshape(shape)
+
+            self.output_ptr[name] = pageable_tensor
+
+            self.pad_start = 0
+            logger.debug(f"PinnedBuffer dump: {name}, {shape}, {dtype}")
+
+        self.tensor_meta[dtype].clear()
+
+    def device_to_host_pinned(self, src_tensor: Tensor, name: str) -> None:
+        """Takes a tensor on a GPU device and returns a copy on CPU.
+
+        Uses CPU pinned memory (rather than default paged) to reduce d2h
+        transfer latency.
+        """
+        assert (
+            src_tensor.is_contiguous()
+        ), "Input tensor to be copied into buffer is not contiguous."
+        assert (
+            src_tensor.dtype in self.pinned_buffers
+        ), f"Input tensor dtype {src_tensor.dtype} is not supported."
+
+        src_shape = src_tensor.shape
+        src_dtype = src_tensor.dtype
+        src_tensor = src_tensor.view(-1).detach()  # flatten may result in a copy.
+        src_n_elements = src_tensor.numel()
+
+        avail_n_elements = len(self.pinned_buffers[src_dtype]) - self.pad_start
+
+        # Can't fit src tensor into buffer so we expand it.
+        if (
+            src_n_elements > avail_n_elements
+            and len(self.tensor_meta[src_dtype]) < self.bucket_size
+        ):
+            self._buffer_overflow(src_n_elements, src_dtype)
+            avail_n_elements = len(self.pinned_buffers[src_dtype]) - self.pad_start
+
+        # Save src tensor into pinned buffer.
+        if src_n_elements <= avail_n_elements:
+            buffer_view = self.pinned_buffers[src_dtype][
+                self.pad_start : self.pad_start + src_n_elements
+            ]
+            buffer_view.copy_(src_tensor)
+            self.tensor_meta[src_dtype][name] = {
+                "shape": src_shape,
+                "buf_start": self.pad_start,
+                "buf_end": self.pad_start + src_n_elements,
+            }
+            logger.debug(
+                f"PinnedBuffer save: {name}, {src_shape}, [{self.pad_start}, "
+                f"{self.pad_start + src_n_elements}]"
+            )
+
+            self.pad_start += src_n_elements
+        else:
+            raise Exception(
+                f"Buffer overflow failed, src elements: {src_n_elements} "
+                f"avail elements: {avail_n_elements}"
+            )
+
+        # Dump pinned buffer to pageable memory.
+        if len(self.tensor_meta[src_dtype]) == self.bucket_size:
+            self._host_pinned_to_pageable(src_dtype)
+
+    def flush(self):
+        for dtype in self.dtypes:
+            self._host_pinned_to_pageable(dtype)
+
+
 class FlexModel(nn.Module):
     """Wraps a Pytorch :code:`nn.Module` to provide an interface for various
     model-surgery techniques. Most importantly, allows registration of
@@ -118,6 +239,7 @@ class FlexModel(nn.Module):
         tensor_parallel_size: int = 1,
         pipeline_parallel_size: int = 1,
         data_parallel_size: int = 1,
+        _use_pinned_buffers: bool = False,
     ):
         """Initialize the instance by wrapping the Pytorch module.
 
@@ -142,6 +264,10 @@ class FlexModel(nn.Module):
         self.tp_size = tensor_parallel_size
         self.pp_size = pipeline_parallel_size
         self.dp_size = data_parallel_size
+        self._use_pinned_buffers = _use_pinned_buffers
+
+        if self._use_pinned_buffers:
+            self._pinned_buffers = PinnedBuffers(self.output_ptr)
 
         if torch.distributed.is_initialized():
             world_size = self.tp_size * self.pp_size * self.dp_size
@@ -169,9 +295,14 @@ class FlexModel(nn.Module):
                 "level hooks yet."
             )
 
+        # Set FlexModel attributes that HookFunction must access.
         hook_function._output_ptr = self.output_ptr
         hook_function.save_ctx = self.save_ctx
         hook_function.modules = self.trainable_modules
+
+        if self._use_pinned_buffers:
+            hook_function._pinned_buffers = self._pinned_buffers
+
         self.hook_functions[hook_function.module_name] = hook_function
 
     def register_trainable_module(self, name: str, module: nn.Module) -> None:
@@ -368,6 +499,10 @@ class FlexModel(nn.Module):
             outputs = self._forward_with_hooks(*args, **kwargs)
         else:
             outputs = self._forward_no_hooks(*args, **kwargs)
+
+        # Post-forward ops.
+        if self._use_pinned_buffers:
+            self._pinned_buffers.flush()
 
         self._gather_pipeline_parallel()
 

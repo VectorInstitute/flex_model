@@ -103,6 +103,8 @@ def hook_function_gpu(self, inputs, outputs, acc, name):
     if rank == 0:
         acc[name] = _outputs.detach()
 
+    return outputs
+
 
 def hook_function_cpu_gather_scatter(self, inputs, outputs, acc, name):
     """Hardcoded minimal hook function with gather/scatter.

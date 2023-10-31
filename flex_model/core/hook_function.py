@@ -196,6 +196,7 @@ class HookFunction:
 
         self.save_ctx: Optional[Namespace] = None
         self.modules: Optional[nn.ModuleDict] = None
+        self._pinned_buffers = None
 
         self._hook_type_to_handle_map = {
             "forward": self._handle_forward,
@@ -258,6 +259,10 @@ class HookFunction:
         assert self._output_ptr is not None
         dumped_tensor = activation.detach().cpu()
         self._output_ptr[self.module_name] = dumped_tensor
+
+    def _bind_tensor_to_cpu_output_pinned(self, activation: Tensor) -> None:
+        assert self._output_ptr is not None
+        raise NotImplementedError
 
     def _parse_tensor(self, tensor: Tensor) -> None:
         """Runs parsers for collection/dispersion, editing and dumping.

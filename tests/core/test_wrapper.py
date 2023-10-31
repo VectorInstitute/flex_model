@@ -203,3 +203,53 @@ def test_save_ctx(opt_350m, opt_tokenizer):
     assert torch.equal(
         activations["save_ctx_activation"], activations["model.decoder.layers.12"],
     )
+
+
+def test_PinnedBuffers_device_to_host_pinned():
+    from flex_model.core.wrapper import PinnedBuffers
+
+    activations = {}
+
+    pinned_buffer = PinnedBuffers(activations, bucket_size=1)
+
+    act_tensors = {
+        "act_0": torch.randn((4, 32), dtype=torch.float32).cuda(),
+        "act_1": torch.randn((4, 32), dtype=torch.float16).cuda(),
+        "act_2": torch.randn((4, 32), dtype=torch.bfloat16).cuda(),
+    }
+
+    for name, act_ten in act_tensors.items():
+        pinned_buffer.device_to_host_pinned(act_ten, name)
+
+    for dtype, buf in pinned_buffer.pinned_buffers.items():
+        assert len(buf) == 4 * 32
+
+    for name, act_ten in activations.items():
+        assert torch.equal(act_tensors[name].cpu(), act_ten)
+
+
+def test_PinnedBuffers_bucket_size():
+    from flex_model.core.wrapper import PinnedBuffers
+
+    activations = {}
+
+    act_tensors = {
+        f"act_{i}": torch.randn((4, 32), dtype=torch.bfloat16).cuda() for i in range(32)
+    }
+
+    bucket_sizes = [i for i in range(1, 8)]
+
+    for bs in bucket_sizes:
+        pinned_buffer = PinnedBuffers(activations, bucket_size=bs)
+
+        for i, (name, act_ten) in enumerate(act_tensors.items(), 1):
+            pinned_buffer.device_to_host_pinned(act_ten, name)
+
+            # Check number of dumped activations.
+            if i != 0 and i % bs == 0:
+                assert len(activations) == i
+
+        # Flush bucket leftovers
+        pinned_buffer.flush()
+        assert len(activations) == len(act_tensors)
+        activations.clear()

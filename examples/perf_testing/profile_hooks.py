@@ -29,6 +29,7 @@ def _add_profile_args(parser):
     group = parser.add_argument_group("profile")
     group.add_argument("--profile", action="store_true")
     group.add_argument("--profile_show", action="store_true")
+    group.add_argument("--profile_save_profile", action="store_true")
     group.add_argument("--profile_warmup_steps", type=int, default=2)
     group.add_argument("--profile_active_steps", type=int, default=10)
     group.add_argument("--profile_wait_steps", type=int, default=1)
@@ -101,12 +102,13 @@ def validate_args(args):
         args.tp_size = int(os.environ["WORLD_SIZE"])
 
     # Make folder for profiling.
-    if args.profile_dir is None:
-        args.profile_dir = (
-            f"{os.getcwd()}/profiles/profile_{os.environ['SLURM_JOB_ID']}"
-        )
-    if not os.path.isdir(args.profile_dir):
-        os.makedirs(args.profile_dir, exist_ok=True)
+    if args.profile_save_profile:
+        if args.profile_dir is None:
+            args.profile_dir = (
+                f"{os.getcwd()}/profiles/profile_{os.environ['SLURM_JOB_ID']}"
+            )
+        if not os.path.isdir(args.profile_dir):
+            os.makedirs(args.profile_dir, exist_ok=True)
 
     return args
 
@@ -125,6 +127,7 @@ def main(args):
     # Initialize distributed and megatron-lm parallel state.
     init_megatron_dist(args)
     rank = torch.distributed.get_rank()
+    torch.manual_seed(rank)
     if rank == 0:
         print_args(args)
 
@@ -142,44 +145,51 @@ def main(args):
     for exp in experiments:
         os.makedirs(f"{args.profile_dir}/{exp.__name__}", exist_ok=True)
 
+    num_steps = (
+        args.profile_wait_steps * args.profile_warmup_steps * args.profile_active_steps
+    )
+
+    # Profiler setup.
+    schedule = torch.profiler.schedule(
+        wait=args.profile_wait_steps,
+        warmup=args.profile_warmup_steps,
+        active=args.profile_active_steps,
+        repeat=1,
+    )
+
     # Run benchmarks for each experiment, sweeping over parameters.
     for model_dim in args.model_dim_sweep:
         for dtype in args.dtype_sweep:
+            # Setup inputs and spoof config.
+            inputs = torch.randn(
+                num_steps, args.batch_size, model_dim, dtype=dtype
+            ).cuda()
+
+            spoof_config = spoof_megatron_config(dtype)
+
             for exp in experiments:
                 exp_name = exp.__name__
 
+                if args.profile_save_profile:
+                    trace_handler = torch.profiler.tensorboard_trace_handler(
+                        f"{args.profile_dir}/{exp.__name__}"
+                    )
+                else:
+                    trace_handler = None
+
                 # Setup network.
-                spoof_config = spoof_megatron_config(dtype)
                 network = exp(
                     model_dim=model_dim, n_layers=args.n_layers, config=spoof_config,
                 ).cuda()
 
-                # Setup inputs.
-                num_steps = (
-                    args.profile_wait_steps
-                    * args.profile_warmup_steps
-                    * args.profile_active_steps
-                )
-                inputs = torch.randn(
-                    num_steps, args.batch_size, model_dim, dtype=dtype
-                ).cuda()
-
                 # Run benchmark.
-                schedule = torch.profiler.schedule(
-                    wait=args.profile_wait_steps,
-                    warmup=args.profile_warmup_steps,
-                    active=args.profile_active_steps,
-                    repeat=1,
-                )
                 with torch.profiler.profile(
                     schedule=schedule,
                     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                     record_shapes=True,
                     with_flops=True,
                     profile_memory=True,
-                    on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                        f"{args.profile_dir}/{exp_name}"
-                    ),
+                    on_trace_ready=trace_handler,
                 ) as prof:
                     for i in range(num_steps):
                         network(inputs[i])
