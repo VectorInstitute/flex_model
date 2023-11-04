@@ -26,3 +26,6 @@ docs/source/generated
 *.out
 *.slrm
 *_logs/
+
+# Jupyter
+*.ipynb
