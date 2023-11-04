@@ -28,17 +28,10 @@ def rsetattr(module, attr, val):
 
 
 class LayerInjection(nn.Module):
-    """
-    Purpose is to replace an MLP module in the model. In short, this class
-    allows us to store and modify an incoming activation without using any
-    sort of forward hooks. It acts as the absolute ground truth for later
-    comparison.
-    """
-
     def __init__(self, module_name: str, model: nn.Module):
         super(LayerInjection, self).__init__()
         self.original_out: torch.Tensor = None
-        self.modified_out: torch.Tensor = None
+        self.saved_out: torch.Tensor = None
         self.decoder_layer: nn.Module = None
 
         for n, m in model.named_modules():
@@ -48,8 +41,8 @@ class LayerInjection(nn.Module):
     def __call__(self, *args, **kwargs) -> torch.Tensor:
         out = self.decoder_layer(*args, **kwargs)
         self.original_out = out.detach()
-        self.modified_out = self.original_out * 2
-        return out
+        self.saved_out = self.original_out
+        return self.original_out * 2
 
 
 def inject_module(injection_layer: nn.Module, model: nn.Module) -> nn.Module:
@@ -64,13 +57,8 @@ def editing_func(
     modules: nn.ModuleDict,
     in_dict: Dict[str, torch.Tensor],
 ) -> torch.Tensor:
-    """
-    Passed into HookFunction. Takes the input tensor, multiplies it by 2, saves it and
-    returns the input tensor.
-    """
     multiplied = inputs * 2
-    in_dict["modified"] = multiplied.detach().cpu()
-    return inputs
+    return multiplied
 
 
 # Call fixture twice.
@@ -78,7 +66,8 @@ opt_350m_gt = opt_350m
 opt_350m_hook = opt_350m
 
 
-def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer):
+@pytest.mark.parametrize("offload_mode", ["CPU", "GPU"])
+def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer, offload_mode):
     """
     Tests if HookFunction implements a forward hook correctly
     """
@@ -97,9 +86,9 @@ def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer):
     # first get our ground truth activations
     inject_layer = LayerInjection(MODULE_NAME, model).to(model.dtype).cuda()
     inject_module(inject_layer, model)
-    model(inputs)
+    gt_out = model(inputs)
 
-    ground_truth = inject_layer.modified_out.cpu()
+    ground_truth = inject_layer.saved_out.cpu()
 
     # now try with HookFunction API
     model = opt_350m_hook.cuda().eval()
@@ -109,7 +98,7 @@ def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer):
         assert not isinstance(m, LayerInjection)
 
     activations = {}
-    model = FlexModel(model, activations,)
+    model = FlexModel(model, activations, offload_mode=offload_mode)
 
     my_hook_function = HookFunction(
         MODULE_NAME,
@@ -117,7 +106,14 @@ def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer):
         editing_function=partial(editing_func, in_dict=activations),
     )
 
-    model.register_hook_function(my_hook_function)
-    model(inputs, with_hooks=True)
+    model.register_forward_hook(my_hook_function)
+    fm_out = model(inputs)
 
-    assert torch.equal(ground_truth, activations["modified"])
+    assert torch.allclose(gt_out.logits, fm_out.logits)
+
+    if offload_mode == "CPU":
+        assert torch.allclose(ground_truth.cpu(), activations[MODULE_NAME])
+        assert activations[MODULE_NAME].device.type == "cpu"
+    else:
+        assert torch.allclose(ground_truth.cuda(), activations[MODULE_NAME])
+        assert activations[MODULE_NAME].device.type == "cuda"

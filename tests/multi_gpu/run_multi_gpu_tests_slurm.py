@@ -84,9 +84,7 @@ class MultiGPUSlurmJob:
 
         job = executor.submit(self.test_batch)
 
-        submitit.helpers.monitor_jobs(
-            [job], poll_frequency=60,  # Print monitor info every minute.
-        )
+        submitit.helpers.monitor_jobs([job])
 
         results = job.results()[0]
 

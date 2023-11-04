@@ -11,12 +11,13 @@ import torch
 import torch.nn as nn
 from torch.profiler import ProfilerActivity
 
-from examples.perf_testing.utils import (
+from flex_model.core import FlexModel
+from flex_model.utils import setup_logger
+from profiling.utils import (
     ExperimentNetworkManager,
     init_megatron_dist,
     spoof_megatron_config,
 )
-from flex_model.utils import setup_logger
 
 DTYPES = {
     "fp32": torch.float32,
@@ -35,6 +36,7 @@ def _add_profile_args(parser):
     group.add_argument("--profile_wait_steps", type=int, default=1)
     group.add_argument("--profile_dir", type=str)
     group.add_argument("--profile_row_limit", type=int, default=5)
+    group.add_argument("--profile_force", type=str)
     return parser
 
 
@@ -169,6 +171,8 @@ def main(args):
 
             for exp in experiments:
                 exp_name = exp.__name__
+                if args.profile_force and exp_name != args.profile_force:
+                    continue
 
                 if args.profile_save_profile:
                     trace_handler = torch.profiler.tensorboard_trace_handler(
@@ -215,7 +219,10 @@ def main(args):
                         )
 
                 # Cleanup.
-                manager.cleanup()
+                if isinstance(network, FlexModel):
+                    network.restore()
+                else:
+                    manager.cleanup()
 
 
 if __name__ == "__main__":

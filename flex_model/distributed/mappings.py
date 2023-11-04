@@ -461,6 +461,9 @@ def gather_pipeline_parallel_tensor_dicts(
 ) -> Dict[str, Tensor]:
     """Gather groups of tensors from ranks of the pipeline group to pipeline rank0.
 
+    Note: Assumes input tensors are on CPU and placed output tensors on CPU.
+    - This behaviour is subject to change depending on various optimizations.
+
     :param tensor_dict: Some python object that can be pickled. May contain tensors.
     :type tensor_dict Dict[str, Tensor]:
 
@@ -494,6 +497,6 @@ def gather_pipeline_parallel_tensor_dicts(
     )
 
     # Communicate.
-    output_tensor_dict = _gather_pipeline_parallel(tbuf_groups, all_metadata_groups,)
+    output_tensor_dict = _gather_pipeline_parallel(tbuf_groups, all_metadata_groups)
 
     return output_tensor_dict

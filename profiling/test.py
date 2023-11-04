@@ -21,36 +21,34 @@ class MatmulModel(nn.Module):
         self.fn_to_bench = fn_to_bench
 
     def forward(self, x):
-        out = self.fc1(x)
-        out = self.fn_to_bench(out)
-        out = self.fc2(out)
+        for _ in range(32):
+            out = self.fc1(x)
+            out = self.fc2(out)
+            out = self.fn_to_bench(out)
         return out
 
 
 def regular(tensor, acc):
-    acc.append(tensor.detach().cpu())
+    new = torch.empty(4096 * 4096, dtype=torch.bfloat16)
+    new.copy_(tensor.view(-1), non_blocking=True)
+    acc.append(new)
 
     return tensor
 
 
-def streams(tensor, acc):
-    s = torch.cuda.Stream()
+pinned_buffer = torch.empty(4096 * 4096, dtype=torch.bfloat16).pin_memory()
 
-    with torch.cuda.stream(s):
-        dump_t = copy.deepcopy(tensor.detach())
-        acc.append(dump_t.cpu())
 
+def _pinned(tensor, acc):
+    pinned_buffer.copy_(tensor.view(-1), non_blocking=True)
+    res = torch.empty_like(pinned_buffer)
+    res.copy_(pinned_buffer, non_blocking=True)
+    acc.append(res.reshape(tensor.shape))
     return tensor
-
-
-pinned_buffer = torch.empty(4096, 4096, dtype=torch.bfloat16).pin_memory()
 
 
 def pinned(tensor, acc):
-    pinned_buffer.copy_(tensor, non_blocking=True)
-    res = torch.empty_like(pinned_buffer)
-    res.copy_(pinned_buffer, non_blocking=True)
-    acc.append(res)
+    new = tensor.view(-1).to("cpu", non_blocking=True)
     return tensor
 
 
@@ -86,7 +84,7 @@ def main(args):
         if i == 0:
             network = MatmulModel(lambda x: e(x, acc=acc)).cuda()
         else:
-            network.fn_to_bench = lambda x: e(x, acc=acc)
+            network.fn_to_bench = lambda x: e(x, acc=acc).cuda()
         trace_handler = torch.profiler.tensorboard_trace_handler(
             root_dir + f"/profiles/test_profiles/{e.__name__}"
         )
@@ -100,11 +98,32 @@ def main(args):
             on_trace_ready=trace_handler,
         ) as prof:
             for i in range(num_steps):
-                _ = network(inputs[i])
+                # _ = network(inputs[i])
+                e(inputs[0], acc)
                 prof.step()
 
     for reg, pin in zip(regular_acc, pinned_acc):
         torch.allclose(reg, pin)
+
+    """
+    x = torch.randn(4096 * 4096, dtype=torch.bfloat16)
+    trace_handler = torch.profiler.tensorboard_trace_handler(
+        root_dir + f"/profiles/test_profiles/copy_base"
+    )
+    with torch.profiler.profile(
+        schedule=schedule,
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        record_shapes=True,
+        with_flops=True,
+        profile_memory=True,
+        on_trace_ready=trace_handler,
+    ) as prof:
+        for i in range(num_steps):
+            pinned_buffer.copy_(x, non_blocking=True)
+            new = torch.empty_like(pinned_buffer)
+            new.copy_(pinned_buffer, non_blocking=True)
+            prof.step()
+    """
 
 
 if __name__ == "__main__":

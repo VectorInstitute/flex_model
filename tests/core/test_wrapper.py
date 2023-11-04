@@ -19,7 +19,7 @@ PROMPTS = [
 ]
 
 
-def test_register_hook_function(opt_350m):
+def test_register_forward_hook(opt_350m):
     """
     Tests if a hook function is registered correctly, and if the fields are set
     appropriately.
@@ -31,12 +31,12 @@ def test_register_hook_function(opt_350m):
 
     my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None))
 
-    model.register_hook_function(my_hook_function)
+    model.register_forward_hook(my_hook_function)
 
-    assert my_hook_function._output_ptr is activations
-    assert my_hook_function.save_ctx is model.save_ctx
-    assert my_hook_function.modules is model.trainable_modules
-    assert model.hook_functions[MODULE_NAME_1] is my_hook_function
+    assert my_hook_function._shared_state.output_ptr is activations
+    assert my_hook_function._shared_state.save_ctx is model.save_ctx
+    assert my_hook_function._shared_state.modules is model.trainable_modules
+    assert my_hook_function._shared_state.offload_mode == "CPU"
 
 
 def test_register_trainable_module(opt_350m):
@@ -54,72 +54,14 @@ def test_register_trainable_module(opt_350m):
     my_hook_function_1 = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None))
     my_hook_function_2 = HookFunction(MODULE_NAME_2, expected_shape=(None, None, None))
 
-    model.register_hook_function(my_hook_function_1)
+    model.register_forward_hook(my_hook_function_1)
     model.register_trainable_module("test", trainable_module)
-    model.register_hook_function(my_hook_function_2)
+    model.register_forward_hook(my_hook_function_2)
 
-    assert "test" in my_hook_function_1.modules
-    assert "test" in my_hook_function_2.modules
-    assert my_hook_function_1.modules["test"] is trainable_module
-    assert my_hook_function_2.modules["test"] is trainable_module
-
-
-def test_wrapped_module_requires_grad(opt_350m):
-    """
-    Test whether all parameters in the wrapped module do/don't require grad
-    upon calling this method.
-    """
-    model = opt_350m.cuda()
-
-    activations = {}
-    trainable_module = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
-    model = FlexModel(model, activations,)
-    model.register_trainable_module("test", trainable_module)
-
-    model.wrapped_module_requires_grad(True)
-    for _, p in model.module.named_parameters():
-        assert p.requires_grad is True
-
-    model.wrapped_module_requires_grad(False)
-    for _, p in model.module.named_parameters():
-        assert p.requires_grad is False
-
-    for train_mod in model.trainable_modules.values():
-        for _, p in train_mod.named_parameters():
-            assert p.requires_grad is True
-
-
-def test_trainable_modules_requires_grad(opt_350m):
-    """
-    Test to ensure *only* the added trainable module is affected by upon
-    calling this method.
-    """
-    model = opt_350m.cuda()
-
-    activations = {}
-    trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
-    trainable_module_2 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
-    model = FlexModel(model, activations,)
-    model.register_trainable_module("test1", trainable_module_1)
-    model.register_trainable_module("test2", trainable_module_2)
-
-    model.trainable_modules_requires_grad(True)
-    model.wrapped_module_requires_grad(True)
-
-    for train_mod in model.trainable_modules.values():
-        for _, p in train_mod.named_parameters():
-            assert p.requires_grad is True
-
-    for _, p in model.module.named_parameters():
-        assert p.requires_grad is True
-
-    model.trainable_modules_requires_grad(False)
-    for train_mod in model.trainable_modules.values():
-        for _, p in train_mod.named_parameters():
-            assert p.requires_grad is False
-
-    for _, p in model.module.named_parameters():
-        assert p.requires_grad is True
+    assert "test" in my_hook_function_1._shared_state.modules
+    assert "test" in my_hook_function_2._shared_state.modules
+    assert my_hook_function_1._shared_state.modules["test"] is trainable_module
+    assert my_hook_function_2._shared_state.modules["test"] is trainable_module
 
 
 def test_destroy(opt_350m):
@@ -137,8 +79,8 @@ def test_destroy(opt_350m):
 
     my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None),)
 
-    model.register_hook_function(my_hook_function)
-    model = model.destroy()
+    model.register_forward_hook(my_hook_function)
+    model = model.module  # Calls FlexModel.__exit__().
 
     assert not isinstance(model, FlexModel)
     assert not getattr(model, "hook_functions", False)
@@ -194,8 +136,8 @@ def test_save_ctx(opt_350m, opt_tokenizer):
         (None, None, None),
         partial(verify_fn, act_dict=activations),
     )
-    model.register_hook_function(retrieve_hook_fn)
-    model.register_hook_function(verify_hook_fn)
+    model.register_forward_hook(retrieve_hook_fn)
+    model.register_forward_hook(verify_hook_fn)
 
     _ = model(inputs)
 
@@ -203,53 +145,3 @@ def test_save_ctx(opt_350m, opt_tokenizer):
     assert torch.equal(
         activations["save_ctx_activation"], activations["model.decoder.layers.12"],
     )
-
-
-def test_PinnedBuffers_device_to_host_pinned():
-    from flex_model.core.wrapper import PinnedBuffers
-
-    activations = {}
-
-    pinned_buffer = PinnedBuffers(activations, bucket_size=1)
-
-    act_tensors = {
-        "act_0": torch.randn((4, 32), dtype=torch.float32).cuda(),
-        "act_1": torch.randn((4, 32), dtype=torch.float16).cuda(),
-        "act_2": torch.randn((4, 32), dtype=torch.bfloat16).cuda(),
-    }
-
-    for name, act_ten in act_tensors.items():
-        pinned_buffer.device_to_host_pinned(act_ten, name)
-
-    for dtype, buf in pinned_buffer.pinned_buffers.items():
-        assert len(buf) == 4 * 32
-
-    for name, act_ten in activations.items():
-        assert torch.equal(act_tensors[name].cpu(), act_ten)
-
-
-def test_PinnedBuffers_bucket_size():
-    from flex_model.core.wrapper import PinnedBuffers
-
-    activations = {}
-
-    act_tensors = {
-        f"act_{i}": torch.randn((4, 32), dtype=torch.bfloat16).cuda() for i in range(32)
-    }
-
-    bucket_sizes = [i for i in range(1, 8)]
-
-    for bs in bucket_sizes:
-        pinned_buffer = PinnedBuffers(activations, bucket_size=bs)
-
-        for i, (name, act_ten) in enumerate(act_tensors.items(), 1):
-            pinned_buffer.device_to_host_pinned(act_ten, name)
-
-            # Check number of dumped activations.
-            if i != 0 and i % bs == 0:
-                assert len(activations) == i
-
-        # Flush bucket leftovers
-        pinned_buffer.flush()
-        assert len(activations) == len(act_tensors)
-        activations.clear()

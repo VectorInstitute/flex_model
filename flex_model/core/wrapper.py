@@ -1,6 +1,12 @@
+import asyncio
+import functools
 import logging
+import time
+import weakref
 from argparse import Namespace
+from collections import defaultdict
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
@@ -9,11 +15,13 @@ from typing import (
     Iterator,
     List,
     Optional,
+    Set,
     Tuple,
     Union,
 )
 
 import torch
+import torch.multiprocessing as mp
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -32,125 +40,46 @@ from .hook_function import HookFunction
 logger = logging.getLogger(__name__)
 
 
-class PinnedBuffers:
-    def __init__(
-        self,
-        output_ptr: Dict[str, Tensor],
-        expansion_scale: int = 1,
-        bucket_size: int = 1,
-    ) -> None:
-        self.output_ptr = output_ptr
-        self.expansion_scale = expansion_scale
-        self.bucket_size = bucket_size
+_OFFLOAD_MODES: Set[str] = {
+    "CPU",
+    "GPU",
+}
 
-        # Need to expand buffer at runtime, don't know at FlexModel init time
-        # what activation sizes will be retrieved.
-        self.dtypes = {torch.float32, torch.float16, torch.bfloat16}
 
-        self.pinned_buffers = {}
-        self.tensor_meta = {}
-        for dtype in self.dtypes:
-            self.pinned_buffers[dtype] = torch.empty((1,), dtype=dtype).pin_memory()
-            self.tensor_meta[dtype] = {}
+def get_module(root_module, tgt_module_name):
+    submodule_names = tgt_module_name.split(".")
+    # Can access submodules by `a.b`, but some modules require `a[b]`.
+    return functools.reduce(
+        lambda carry, n: getattr(carry, n)
+        if not isinstance(carry, (nn.ModuleList, nn.Sequential))
+        else carry[int(n)],
+        submodule_names,
+        root_module,
+    )
 
-        self.pad_start = 0
-        logger.debug(
-            f"PinnedBuffers init: bucket_size = {self.bucket_size}, "
-            f"expansion_scale = {self.expansion_scale}"
-        )
 
-    def _buffer_overflow(self, new_n_elements, dtype) -> None:
-        original_size = self.pinned_buffers[dtype].numel()
-        if original_size == 1:  # First fault should allocate cleanly.
-            original_size = 0
+@dataclass
+class _SharedState:
+    output_ptr: Dict[str, Tensor]
+    save_ctx: Namespace
+    modules: nn.ModuleDict
+    offload_mode: str
 
-        new_size = new_n_elements * self.expansion_scale + original_size
 
-        # Perf NOTE: Need to re-allocate pinned memory since `.resize_()`
-        #            doesn't work with pinned memory tensors. Can investigate
-        #            smart ways to figure out how to statically allocate this.
-        new_buf = torch.empty((new_size,), dtype=dtype).pin_memory()
+def _finalize_dangling_state(hook_functions) -> None:
+    """Clear persistent state when FlexModel is garbage collected."""
+    # Remove hook functions from model.
+    for group_name, module_to_hf in hook_functions.items():
+        for m, hf_to_handle in module_to_hf.items():
+            for hf, handle in hf_to_handle.items():
+                handle.remove()
+    hook_functions.clear()
 
-        self.pinned_buffers[dtype] = new_buf
-        logger.debug(f"PinnedBuffer buffer_overflow: {dtype} -> {new_size}")
-
-    def _host_pinned_to_pageable(self, dtype: torch.dtype):
-        """Dump all contents of a buffer for the given dtype into pageable."""
-        # Bucket filled, allocate and dump to CPU pageable.
-        for name, meta in self.tensor_meta[dtype].items():
-            shape = meta["shape"]
-            buf_start, buf_end = meta["buf_start"], meta["buf_end"]
-            buffer_view = self.pinned_buffers[dtype][buf_start:buf_end]
-
-            pageable_tensor = torch.empty((buf_end - buf_start,), dtype=dtype)
-            pageable_tensor.copy_(buffer_view)
-            pageable_tensor = pageable_tensor.reshape(shape)
-
-            self.output_ptr[name] = pageable_tensor
-
-            self.pad_start = 0
-            logger.debug(f"PinnedBuffer dump: {name}, {shape}, {dtype}")
-
-        self.tensor_meta[dtype].clear()
-
-    def device_to_host_pinned(self, src_tensor: Tensor, name: str) -> None:
-        """Takes a tensor on a GPU device and returns a copy on CPU.
-
-        Uses CPU pinned memory (rather than default paged) to reduce d2h
-        transfer latency.
-        """
-        assert (
-            src_tensor.is_contiguous()
-        ), "Input tensor to be copied into buffer is not contiguous."
-        assert (
-            src_tensor.dtype in self.pinned_buffers
-        ), f"Input tensor dtype {src_tensor.dtype} is not supported."
-
-        src_shape = src_tensor.shape
-        src_dtype = src_tensor.dtype
-        src_tensor = src_tensor.view(-1).detach()  # flatten may result in a copy.
-        src_n_elements = src_tensor.numel()
-
-        avail_n_elements = len(self.pinned_buffers[src_dtype]) - self.pad_start
-
-        # Can't fit src tensor into buffer so we expand it.
-        if (
-            src_n_elements > avail_n_elements
-            and len(self.tensor_meta[src_dtype]) < self.bucket_size
-        ):
-            self._buffer_overflow(src_n_elements, src_dtype)
-            avail_n_elements = len(self.pinned_buffers[src_dtype]) - self.pad_start
-
-        # Save src tensor into pinned buffer.
-        if src_n_elements <= avail_n_elements:
-            buffer_view = self.pinned_buffers[src_dtype][
-                self.pad_start : self.pad_start + src_n_elements
-            ]
-            buffer_view.copy_(src_tensor)
-            self.tensor_meta[src_dtype][name] = {
-                "shape": src_shape,
-                "buf_start": self.pad_start,
-                "buf_end": self.pad_start + src_n_elements,
-            }
-            logger.debug(
-                f"PinnedBuffer save: {name}, {src_shape}, [{self.pad_start}, "
-                f"{self.pad_start + src_n_elements}]"
-            )
-
-            self.pad_start += src_n_elements
-        else:
-            raise Exception(
-                f"Buffer overflow failed, src elements: {src_n_elements} "
-                f"avail elements: {avail_n_elements}"
-            )
-
-        # Dump pinned buffer to pageable memory.
-        if len(self.tensor_meta[src_dtype]) == self.bucket_size:
-            self._host_pinned_to_pageable(src_dtype)
-
-    def flush(self):
-        for dtype in self.dtypes:
-            self._host_pinned_to_pageable(dtype)
+    # Clear distributed states.
+    if dist.distributed_backend_is_initialized():
+        if dist.activation_parallel_is_initialized():
+            dist.destroy_activation_parallel()
+        dist.destroy_distributed_backend()
 
 
 class FlexModel(nn.Module):
@@ -229,9 +158,6 @@ class FlexModel(nn.Module):
 
     """
 
-    # TODO: Backward hook refactor
-    # TODO: Tests for each function independently
-
     def __init__(
         self,
         module: nn.Module,
@@ -239,7 +165,7 @@ class FlexModel(nn.Module):
         tensor_parallel_size: int = 1,
         pipeline_parallel_size: int = 1,
         data_parallel_size: int = 1,
-        _use_pinned_buffers: bool = False,
+        offload_mode: str = "CPU",
     ):
         """Initialize the instance by wrapping the Pytorch module.
 
@@ -255,20 +181,17 @@ class FlexModel(nn.Module):
         """
         super().__init__()
         self.module = module
-        self.hook_functions: Dict[str, HookFunction] = {}
-        self._hook_function_handles: Dict[str, torch.utils.hooks.RemovableHandle] = {}
-        self._hooks_active: bool = False
+        self.hook_functions: Dict[
+            nn.Module, Dict[HookFunction, torch.utils.hooks.RemovableHandle]
+        ] = {"all": defaultdict(dict)}
         self.output_ptr = output_ptr
         self.save_ctx: Namespace = Namespace()  # dumb Namespace for now
         self.trainable_modules = nn.ModuleDict()
         self.tp_size = tensor_parallel_size
         self.pp_size = pipeline_parallel_size
         self.dp_size = data_parallel_size
-        self._use_pinned_buffers = _use_pinned_buffers
 
-        if self._use_pinned_buffers:
-            self._pinned_buffers = PinnedBuffers(self.output_ptr)
-
+        # Initialize FM distributed.
         if torch.distributed.is_initialized():
             world_size = self.tp_size * self.pp_size * self.dp_size
             dist.initialize_distributed_backend(
@@ -276,34 +199,144 @@ class FlexModel(nn.Module):
             )
             dist.initialize_activation_parallel()
 
-    def register_hook_function(self, hook_function: HookFunction) -> None:
-        """Register a user-defined `HookFunction` instance.
+        global _OFFLOAD_MODES
+        assert offload_mode in _OFFLOAD_MODES
+        self.offload_mode = offload_mode
 
-        Given a :class:`HookFunction` attach any necessary global context such as
-        the activation output dictionary. Save it into the :class:`FlexModel`s
-        :class:`HookFunction` collection keyed by the module name to hook into.
+        # Create shared state between FM instance and HF instances.
+        self._shared_state = _SharedState(
+            self.output_ptr, self.save_ctx, self.trainable_modules, self.offload_mode,
+        )
 
-        :param HookFunction hook_function: User-defined :class:`HookFunction` instance
-            to register.
-        """
+        # Initialize mappings.
+        self._hook_type_to_pt_attr = {
+            "forward": "register_forward_hook",
+            "full_backward": "register_full_backward_hook",
+            "tensor": "register_hook",
+            "forward_pre": "register_forward_pre_hook",
+            "backward_pre": "register_full_backward_pre_hook",
+        }
+
+        self._finalizer = weakref.finalize(
+            self, _finalize_dangling_state, self.hook_functions,
+        )
+
+    def restore(self) -> nn.Module:
+        """Cleans up dangling states and modifications to wrapped module."""
+        self._finalizer()
+        return self.module
+
+    @functools.singledispatchmethod
+    def make_group(self, group_constructor):
+        raise NotImplementedError(f"Cannot make group using: {group_constructor}")
+
+    @make_group.register
+    def _(self, group_constructor: str):
+        # TODO: Pattern match module names for already-registered hook functions.
+        raise NotImplementedError
+
+    @make_group.register
+    def _(self, group_constructor: list, group_alias: str):
+        # TODO: Construct group explicitly using hook functions.
+        raise NotImplementedError
+
+    def _register_hook_impl(self, hook_function: HookFunction) -> None:
+        """Registers hook to underlying pytorch module."""
+        module = get_module(self.module, hook_function.module_name)
+
+        # Register hook function to pt module.
+        register_fn = getattr(
+            module, self._hook_type_to_pt_attr[hook_function._hook_type], None
+        )
+        handle = register_fn(hook_function)
+        self.hook_functions["all"][module][hook_function] = handle
+
+    def _hook_registration_prologue(
+        self, hook_function: HookFunction, hook_type: str, lazy: bool
+    ):
+        """Validate hook function and set state."""
+        # Validate hook function.
         if (
-            isinstance(self.module, FSDP)
-            and hook_function.hook_type == "tensor_backward"
+            "_fsdp_wrapped_module" in hook_function.module_name
+            and hook_type == "tensor"
         ):
             raise NotImplementedError(
                 "Pytorch FSDP is currently not supported for parameter/grad "
                 "level hooks yet."
             )
+        assert (
+            hook_type in self._hook_type_to_pt_attr
+        ), "Invalid hook type provided: {hook_type}"
 
-        # Set FlexModel attributes that HookFunction must access.
-        hook_function._output_ptr = self.output_ptr
-        hook_function.save_ctx = self.save_ctx
-        hook_function.modules = self.trainable_modules
+        # Set private HF state.
+        assert hook_function._shared_state is None
+        assert hook_function._hook_type is None
+        hook_function._shared_state = self._shared_state
+        hook_function._hook_type = hook_type
 
-        if self._use_pinned_buffers:
-            hook_function._pinned_buffers = self._pinned_buffers
+        # Pass to registration impl.
+        self._register_hook_impl(hook_function)
 
-        self.hook_functions[hook_function.module_name] = hook_function
+    def register_forward_hook(self, hook_function: HookFunction, lazy=False) -> None:
+        self._hook_registration_prologue(hook_function, "forward", lazy)
+
+    def register_full_backward_hook(
+        self, hook_function: HookFunction, lazy=False
+    ) -> None:
+        self._hook_registration_prologue(hook_function, "full_backward", lazy)
+
+    def register_hook(self, hook_function: HookFunction, lazy=False) -> None:
+        self._hook_registration_prologue(hook_function, "tensor", lazy)
+
+    def register_forward_pre_hook(
+        self, hook_function: HookFunction, lazy=False
+    ) -> None:
+        self._hook_registration_prologue(hook_function, "forward_pre", lazy)
+
+    def register_full_backward_pre_hook(
+        self, hook_function: HookFunction, lazy=False
+    ) -> None:
+        self._hook_registration_prologue(hook_function, "backward_pre", lazy)
+
+    def _enable_group_hooks(self, group: str):
+        for m, hook_fn_to_handle in self.hook_functions[group].items():
+            for hook_fn, handle in hook_fn_to_handle.items():
+                if handle is None:
+                    self._register_hook_impl(m, hook_fn)
+
+    def _disable_group_hooks(self, group: str):
+        for m, hook_fn_to_handle in self.hook_functions[group].items():
+            for hook_fn, handle in hook_fn_to_handle.items():
+                if handle is not None:
+                    handle.remove()
+                    self.hook_functions[group][m][hook_fn] = None
+
+    def _flush_pipeline(self) -> None:
+        """Gather tensors from all pipeline stages to the first stage."""
+        if (
+            torch.distributed.is_initialized()
+            and dist.in_pipeline_parallel_group()
+            and dist.get_activation_pipeline_parallel_world_size() > 1
+        ):
+            gathered_acts = dist.gather_pipeline_parallel_tensor_dicts(self.output_ptr)
+
+            # Rank 0 accumulates the activation tensors.
+            if dist.get_activation_pipeline_parallel_rank() == 0:
+                self.output_ptr.update(gathered_acts)
+
+            # Other ranks reset their collections for the next forward pass.
+            else:
+                self.output_ptr = {}
+
+    def forward(self, *args, _group: str = "all", **kwargs):
+        self._enable_group_hooks(_group)
+
+        outputs = self.module(*args, **kwargs)
+
+        # Post-forward cleanup.
+        self._flush_pipeline()
+
+        return outputs
 
     def register_trainable_module(self, name: str, module: nn.Module) -> None:
         """Register trainable module accessible to all :class:`HookFunction` instances.
@@ -315,77 +348,6 @@ class FlexModel(nn.Module):
         :param nn.Module module: :code:`nn.Module` to register.
         """
         self.trainable_modules[name] = module
-
-    def enable_forward_hooks(self) -> None:
-        """Set forward hooks into the wrapped module indefinitely.
-
-        Takes all registered `HookFunction` instances and registers them into
-        the wrapped module to run during the model forward pass.
-
-        :raises NameError: Module name associated with a :class:`HookFunction` was not
-            found in the wrapped module, hence the :class:`HookFunction` would be
-            unused.
-        """
-        if not self._hooks_active:
-
-            submodules = {n: p for n, p in self.module.named_modules()}
-            for module_name, hook_function in self.hook_functions.items():
-                submod = submodules.get(module_name, None)
-
-                if submod is None:
-                    raise NameError(
-                        f"Hook function module name: {module_name} could not "
-                        f"be found in the wrapped model."
-                    )
-
-                hook_registry_function = hook_function._hook_registry_function
-                module_hook_registry_function = getattr(
-                    submod, hook_registry_function, None,
-                )
-                assert module_hook_registry_function is not None, (
-                    f"Module can't find hook registry function: "
-                    f"{hook_registry_function}"
-                )
-                handle = module_hook_registry_function(hook_function)
-
-                self._hook_function_handles[module_name] = handle
-                logger.debug(f"Intalling hook function on module {module_name}")
-
-            self._hooks_active = True
-
-    def disable_forward_hooks(self) -> None:
-        """Un-set forward hooks in the wrapped module indefinitely.
-
-        Takes all registered and active forward :class:`HookFunction` handles and
-        deletes them.
-        """
-        if self._hooks_active:
-
-            for hook_function_handle in self._hook_function_handles.values():
-                hook_function_handle.remove()
-            self._hook_function_handles.clear()
-
-            self._hooks_active = False
-
-    @contextmanager
-    def hooks(self) -> Iterator[None]:
-        """Context manager for applying forward hooks.
-
-        Enables hooks within the context. When the context is exited, the
-        hooks are disabled. State like the :code:`save_ctx` and :code:`trainable_modules`
-        is persistent between entrance and exit of this context manager. Hence
-        this context manager mainly controls when activations are retrieved
-        and/or edited.
-
-        :returns: Yields nothing as it just manages setup and
-            teardown of hooks.
-        :rtype: Iterator[None]
-        """
-        self.enable_forward_hooks()
-        try:
-            yield
-        finally:
-            self.disable_forward_hooks()
 
     def get_module_parameter(
         self, parameter_name: str, expected_shape: Tuple[int, ...],
@@ -422,125 +384,6 @@ class FlexModel(nn.Module):
         full_param = collect_fn(local_param).cpu()
         return full_param
 
-    def _gather_pipeline_parallel(self) -> None:
-        """Gathers output dicts across the pipeline parallel workers to global
-        rank0.
-
-        :note: If :code:`pipeline_parallel_size == 1`, then this function
-            is a no-op.
-        """
-        if (
-            torch.distributed.is_initialized()
-            and dist.in_pipeline_parallel_group()
-            and dist.get_activation_pipeline_parallel_world_size() > 1
-        ):
-            gathered_acts = dist.gather_pipeline_parallel_tensor_dicts(self.output_ptr,)
-
-            # Rank 0 accumulates the activation tensors.
-            if dist.get_activation_pipeline_parallel_rank() == 0:
-                self.output_ptr.update(gathered_acts)
-
-            # Other ranks reset their collections for the next forward pass.
-            else:
-                self.output_ptr = {}
-
-    def _forward_with_hooks(self, *args, **kwargs) -> Any:
-        """Run the forward pass with hook functions enabled.
-
-        If hooks are active, then we just run the forward pass. If the hooks
-        are disabled, then we briefly enable them with the context manager
-        which disables them again automatically after the forward pass has
-        completed.
-
-        :returns: The output of the wrapped model.
-        :rtype: Any
-        """
-        if self._hooks_active:
-            outputs = self.module(*args, **kwargs)
-        else:
-            with self.hooks():
-                outputs = self.module(*args, **kwargs)
-
-        return outputs
-
-    def _forward_no_hooks(self, *args, **kwargs) -> Any:
-        """Run forward pass with hook functions disabled.
-
-        If hooks are active, then we briefly disable them before running the
-        forward pass, then enable them again after the forward pass is
-        completed. If the hooks are disabled, then we simply run the forward
-        pass.
-
-        :returns: The output of the wrapped model.
-        :rtype: Any
-        """
-        if self._hooks_active:
-            self.disable_forward_hooks()
-            outputs = self.module(*args, **kwargs)
-            self.enable_forward_hooks()
-
-        else:
-            outputs = self.module(*args, **kwargs)
-        return outputs
-
-    def forward(self, *args, with_hooks: bool = True, **kwargs) -> Any:
-        """Run forward pass of the wrapped module with arbitrary arguments.
-
-        Primary entrypoint where activations are generated and potentially
-        retrieved and/or edited.
-
-        :param bool with_hooks: Boolean flag which can temporarily disable
-            hooks. The default behaviour is to always run with hooks.
-
-        :returns: Output of the wrapped module.
-        :rtype: Any
-        """
-        if with_hooks:
-            outputs = self._forward_with_hooks(*args, **kwargs)
-        else:
-            outputs = self._forward_no_hooks(*args, **kwargs)
-
-        # Post-forward ops.
-        if self._use_pinned_buffers:
-            self._pinned_buffers.flush()
-
-        self._gather_pipeline_parallel()
-
-        return outputs
-
-    def wrapped_module_requires_grad(self, requires_grad: bool) -> None:
-        """Recursively enable/disable gradient on wrapped module submodules.
-
-        Sets the :code:`requires_grad` field recursively on all submodules of the
-        wrapped model.
-
-        :param bool requires_grad: True or False value for gradient tensor
-            calculation.
-        """
-        self.module.requires_grad_(requires_grad)
-
-    def trainable_modules_requires_grad(self, requires_grad: bool) -> None:
-        """Recursively enable/disable gradient on trainable modules.
-
-        Sets the :code:`reqires_grad` field on all modules in the main
-        `nn.ModuleDict` collection.
-
-        :param bool requires_grad: True or False value for gradient tensor
-            calculation.
-        """
-        self.trainable_modules.requires_grad_(requires_grad)
-
-    def all_modules_requires_grad(self, requires_grad: bool) -> None:
-        """Recursively enable/disable gradient computation on all submodules.
-
-        This is basically a combination of :code:`wrapped_requires_grad` and
-        :code:`trainable_modules_requires_grad`.
-
-        :param bool requires_grad: True or False value for gradient tensor
-            calculation.
-        """
-        self.requires_grad_(requires_grad)
-
     @property
     def wrapped_module_names(self) -> List[str]:
         """Names of wrapped module submodules.
@@ -567,33 +410,3 @@ class FlexModel(nn.Module):
         :rtype: List[str]
         """
         return self.wrapped_module_names + self.trainable_module_names
-
-    def _clear_all_state_(self) -> None:
-        """Destroy all `HookFunction` and distributed state.
-
-        Deletes `HookFunction` states, caching contexts, trainable modules
-        and distributed backend/groups.
-        """
-        self.hook_functions.clear()
-        for handle in self._hook_function_handles.values():
-            handle.remove()
-        self._hook_function_handles.clear()
-        self._hooks_active = False
-        self.save_ctx = Namespace()
-        self.trainable_modules.clear()
-
-        if torch.distributed.is_initialized():
-            dist.destroy_activation_parallel()
-            dist.destroy_distributed_backend()
-
-    def destroy(self) -> nn.Module:
-        """Destroys `FlexModel` state and returns the wrapped module untouched.
-
-        Explicit destruction of `FlexModel` state while leaving the wrapped
-        model invariant.
-
-        :returns: The original wrapped module.
-        :rtype: nn.Module
-        """
-        self._clear_all_state_()
-        return self.module

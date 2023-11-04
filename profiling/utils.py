@@ -158,56 +158,38 @@ def hook_function_cpu_gather_scatter(self, inputs, outputs, acc, name):
 class ExperimentNetworkManager:
     """Contains functions for creating the experiment networks.
 
-    Also can cache networks to reduce initialization latency.
+    Also tries to cache networks to reduce initialization latency.
     """
 
     def __init__(self):
         self.cpu_acc = {}
-        self.named_experiments = [
-            "single_gpu_no_hooks",
-            "single_gpu_unity_hooks",
-            "single_gpu_cpu_hooks",
-            "multi_gpu_no_hooks",
-            "multi_gpu_unity_hooks",
-            "multi_gpu_cpu_hooks",
-            "multi_gpu_gpu_hooks",
-            "multi_gpu_cpu_hooks_with_gather_scatter",
-            "multi_gpu_flex_model",
-        ]
+        self.experiment_prefixes = ["multi_gpu_", "single_gpu_"]
+        self.named_experiments = list(
+            filter(
+                lambda attr: any(
+                    attr.startswith(prefix) for prefix in self.experiment_prefixes
+                ),
+                dir(self),
+            )
+        )
+
         self.hook_handles = defaultdict(list)
         self.network_cache = None
 
     def cleanup(self):
         self.cpu_acc.clear()
 
-        # NOTE: When the FlexModel goes out of scope, its pointers to the hook
-        #       function handles trigger RemovableHandle.__exit__() which
-        #       automatically calls `.remove()`. Hence we don't need to remove
-        #       them manually here for the wrapped network.
         self.remove_hooks(self.network_cache[-1])
 
         for m in self.network_cache[-1].modules():
             assert len(m._forward_hooks) == 0
-
-    def _hook_every_layer(self, network, hook_fn):
-        module_names_to_hook = set(f"layers.{i}" for i in range(len(network.layers)))
-        for n, m in network.named_modules():
-            if n in module_names_to_hook:
-                hook_fn = functools.partial(hook_fn, name=n)
-                handle = m.register_forward_hook(hook_fn)
-                self.hook_handles[network].append(handle)
-                module_names_to_hook.remove(n)
-
-        assert (
-            len(module_names_to_hook) == 0
-        ), f"Have left over modules to hook: {module_names_to_hook}"
 
     def remove_hooks(self, network):
         handles = self.hook_handles.get(network, [])
         for handle in handles:
             handle.remove()
 
-    def check_network_cache(self, *args, **kwargs):
+    def _check_network_cache(self, *args, **kwargs):
         if self.network_cache is None:
             return False
 
@@ -222,12 +204,25 @@ class ExperimentNetworkManager:
         return True
 
     def make_network(self, *args, **kwargs):
-        if self.check_network_cache(*args, **kwargs):
+        if self._check_network_cache(*args, **kwargs):
             network = self.network_cache[-1]
         else:
             network = TestNetwork(*args, **kwargs)
             self.network_cache = [*args, kwargs, network]
         return network
+
+    def _hook_every_layer(self, network, hook_fn):
+        module_names_to_hook = set(f"layers.{i}" for i in range(len(network.layers)))
+        for n, m in network.named_modules():
+            if n in module_names_to_hook:
+                hook_fn = functools.partial(hook_fn, name=n)
+                handle = m.register_forward_hook(hook_fn)
+                self.hook_handles[network].append(handle)
+                module_names_to_hook.remove(n)
+
+        assert (
+            len(module_names_to_hook) == 0
+        ), f"Have left over modules to hook: {module_names_to_hook}"
 
     def single_gpu_no_hooks(self, model_dim, n_layers, config):
         network = self.make_network(
@@ -325,7 +320,7 @@ class ExperimentNetworkManager:
             f"layers.{i}" for i in range(len(base_network.layers))
         )
         for n in module_names_to_hook:
-            network.register_hook_function(
+            network.register_forward_hook(
                 HookFunction(module_name=n, expected_shape=(None, model_dim),)
             )
         return network
