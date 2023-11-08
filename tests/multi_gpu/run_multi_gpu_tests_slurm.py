@@ -78,7 +78,7 @@ class MultiGPUSlurmJob:
         slurm_params = asdict(self.res_spec)
         python = slurm_params.pop("python", None)
 
-        executor = submitit.SlurmExecutor(folder=self.log_dir, python=python,)
+        executor = submitit.SlurmExecutor(folder=self.log_dir, python=python)
 
         executor.update_parameters(**slurm_params)
 
@@ -126,6 +126,7 @@ def main():
         )
 
     # Run each job.
+    # TODO: Launch all at once.
     for job in test_slurm_jobs.values():
         job.run()
 

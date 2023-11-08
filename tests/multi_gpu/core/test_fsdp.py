@@ -96,7 +96,7 @@ LLAMA_MODULES_FSDP = {
 
 
 @register_multigpu_test
-def test_huggingface_llama(hook_type: str = "forward"):
+def test_huggingface_llama():
     """
     Make sure an accelerate-FSDP model gives the same output as a model
     running on one gpu. The single-gpu model will process one batch at a time.
@@ -128,9 +128,7 @@ def test_huggingface_llama(hook_type: str = "forward"):
         model, multi_gpu_activations, data_parallel_size=accelerator.num_processes,
     )
     for module_name, expected_shape in LLAMA_MODULES_FSDP.items():
-        flex_model.register_hook_function(
-            HookFunction(module_name, expected_shape, hook_type=hook_type,)
-        )
+        flex_model.register_forward_hook(HookFunction(module_name, expected_shape))
 
     chunked_inputs = inputs.chunk(accelerator.num_processes, dim=0)
 
@@ -156,9 +154,7 @@ def test_huggingface_llama(hook_type: str = "forward"):
     flex_model = FlexModel(model, single_gpu_activations)
 
     for module_name, expected_shape in LLAMA_MODULES.items():
-        flex_model.register_hook_function(
-            HookFunction(module_name, expected_shape, hook_type=hook_type,)
-        )
+        flex_model.register_forward_hook(HookFunction(module_name, expected_shape))
 
     for chunk in chunked_inputs:
         _ = flex_model(chunked_inputs[0])
@@ -169,7 +165,7 @@ def test_huggingface_llama(hook_type: str = "forward"):
     # Make sure activations are equal
     for k in single_gpu_activations.keys():
         assert torch.allclose(
-            all_single_gpu_activations[k], multi_gpu_activations_[k],
+            all_single_gpu_activations[k][0], multi_gpu_activations_[k][0],
         ), (
             f"Failed: {k}, max diff: "
             f"{(all_single_gpu_activations[k] - multi_gpu_activations_[k]).abs().max()}"

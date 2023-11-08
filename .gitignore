@@ -8,9 +8,15 @@ __pycache__/
 
 *.egg-info/
 
+# Stubs and logs
 llama/
 *.logits
+*.log
+.ipynb_checkpoints/
 transformers/
+Megatron-LM/
+wandb/
+profiles/
 
 docs/build/
 docs/source/generated
@@ -20,3 +26,6 @@ docs/source/generated
 *.out
 *.slrm
 *_logs/
+
+# Jupyter
+*.ipynb

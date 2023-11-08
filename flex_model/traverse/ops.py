@@ -83,7 +83,8 @@ def flatten(
 
 
 def unflatten(
-    root_node: Union[InternalNode, LeafNode, ScalarNode], leaves: List[Optional[Tensor]]
+    root_node: Union[InternalNode, LeafNode, ScalarNode],
+    leaves: List[Optional[Tensor]],
 ) -> Any:
     """Repack a tree definition and list of leaves into the original python
     object.
