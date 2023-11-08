@@ -165,7 +165,7 @@ def test_huggingface_llama():
     # Make sure activations are equal
     for k in single_gpu_activations.keys():
         assert torch.allclose(
-            all_single_gpu_activations[k], multi_gpu_activations_[k],
+            all_single_gpu_activations[k][0], multi_gpu_activations_[k][0],
         ), (
             f"Failed: {k}, max diff: "
             f"{(all_single_gpu_activations[k] - multi_gpu_activations_[k]).abs().max()}"

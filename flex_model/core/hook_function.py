@@ -21,16 +21,6 @@ LayerOutputs = Union[InternalObject, LeafObject, ScalarObject]
 logger = logging.getLogger(__name__)
 
 
-# Map: hook type -> nn.Module hook registry function.
-_PYTORCH_HOOK_MAP = {
-    "forward": "register_forward_hook",
-    "backward": "register_full_backward_hook",
-    "tensor_backward": "register_hook",
-    "pre_forward": "register_forward_pre_hook",
-    "pre_backward": "register_full_backward_pre_hook",
-}
-
-
 def _parse_editing_function(edit_function: Callable) -> Callable:
     """Parse the user-provided editing function.
 
@@ -154,6 +144,12 @@ class HookFunction:
         :type editing_function: Optional[Callable]
         :param str hook_type: Type of hook to register, eg. forward, backward,
             etc.
+        :param int unpack_idx: Index of the tensor in the unpacked layer output
+            list. When layer outputs are pre-processed before editing function
+            execution, valid `torch.Tensor` objects are extracted into a list
+            by recursive unpacking. Hence the `unpack_idx` parameter allows
+            for specification of which tensor to consider the activation
+            tensor for downstream processing in the `HookFunction`.
         """
         # User-provided state.
         self.module_name = module_name
@@ -176,6 +172,15 @@ class HookFunction:
         self._disperse: Optional[Callable] = None
         self._edit: Optional[Callable] = None
         self._offload: Optional[Callable] = None
+
+        # Valid hook function implementations.
+        self.hook_type_to_impl_fn = {
+            "forward": self._forward_hook_impl,
+            "full_backward": self._full_backward_hook_impl,
+            "tensor": self._tensor_hook_impl,
+            "forward_pre": self._forward_pre_hook_impl,
+            "full_backward_pre": self._full_backward_pre_hook_impl,
+        }
 
     def _unpack_layer_outputs(
         self, outputs: Union[LayerOutputs, Tensor],
@@ -232,16 +237,29 @@ class HookFunction:
             if not using_torch_dist() or (using_act_dist() and in_pp_group()):
                 # Tensor.to() with non_blockin=True operates on shared memory
                 # buffers automatically.
-                self._shared_state.output_ptr[
-                    self.module_name
-                ] = activation.detach().to("cpu", non_blocking=True)
+                if self._shared_state.output_ptr.get(self.module_name, False):
+                    self._shared_state.output_ptr[self.module_name].append(
+                        activation.detach().to("cpu", non_blocking=True)
+                    )
+                else:
+                    self._shared_state.output_ptr[self.module_name] = [
+                        activation.detach().to("cpu", non_blocking=True)
+                    ]
 
         def _offload_tensor_to_gpu(activation: Tensor) -> None:
             assert self._shared_state.output_ptr is not None
 
             if not using_torch_dist() or (using_act_dist() and in_pp_group()):
-                self._shared_state.output_ptr[self.module_name] = activation.detach()
+                if self._shared_state.output_ptr.get(self.module_name, False):
+                    self._shared_state.output_ptr[self.module_name].append(
+                        activation.detach().clone()
+                    )
+                else:
+                    self._shared_state.output_ptr[self.module_name] = [
+                        activation.detach().clone()
+                    ]
 
+        # Valid offload modes.
         mode_to_fn = {
             "CPU": _offload_tensor_to_cpu,
             "GPU": _offload_tensor_to_gpu,
@@ -293,15 +311,7 @@ class HookFunction:
         """
         logger.debug(f"*{self.module_name}: Hook function activated*")
 
-        hook_type_to_impl_fn = {
-            "forward": self._forward_hook_impl,
-            "full_backward": self._full_backward_hook_impl,
-            "tensor": self._tensor_hook_impl,
-            "forward_pre": self._forward_pre_hook_impl,
-            "full_backward_pre": self._full_backward_pre_hook_impl,
-        }
-
-        handle_fn = hook_type_to_impl_fn[self._hook_type]
+        handle_fn = self.hook_type_to_impl_fn[self._hook_type]
         retval = handle_fn(*hook_function_args)
 
         return retval
@@ -347,7 +357,7 @@ class HookFunction:
         outputs = self._template_layer_outputs(module, grad_outputs)
         return outputs
 
-    def _template_handle_tensor(self, module: nn.Module, tensor: Tensor,) -> Tensor:
+    def _template_handle_tensor(self, module: nn.Module, tensor: Tensor) -> Tensor:
         """Template function for editing a sharded activation tensor.
 
         This function is used alone in cases where hook functions operate
@@ -356,13 +366,17 @@ class HookFunction:
         start_shape = tensor.shape
 
         # Concretize functions.
-        if (
-            self._collect is None
-            or self._disperse is None
-            or self._edit is None
-            or self._offload is None
-        ):
+        fns_to_check = [self._collect, self._disperse, self._edit, self._offload]
+        fns_are_undefined = [fn is None for fn in fns_to_check]
+        if all(fns_are_undefined):
             self._concretize_functions(tensor)
+        elif not all(fns_are_undefined):
+            pass
+        else:
+            raise Exception(
+                "HookFunction runtime functions are only partially defined. "
+                "Crashing since HookFunction may be corrupted."
+            )
 
         tensor = self._collect(tensor)
 
@@ -410,7 +424,7 @@ class HookFunction:
 
         return edited_inputs_or_outputs
 
-    def __call__(self, *args, **kwargs,) -> LayerOutputs:
+    def __call__(self, *args, **kwargs) -> LayerOutputs:
         """Entrypoint called by Pytorch hook logic.
 
         Allows us to bind the entire :class:`HookFunction` to an :code:`nn.Module`

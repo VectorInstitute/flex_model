@@ -1,4 +1,3 @@
-import asyncio
 import functools
 import logging
 import time
@@ -40,13 +39,7 @@ from .hook_function import HookFunction
 logger = logging.getLogger(__name__)
 
 
-_OFFLOAD_MODES: Set[str] = {
-    "CPU",
-    "GPU",
-}
-
-
-def get_module(root_module, tgt_module_name):
+def _get_module(root_module: nn.Module, tgt_module_name: str) -> nn.Module:
     submodule_names = tgt_module_name.split(".")
     # Can access submodules by `a.b`, but some modules require `a[b]`.
     return functools.reduce(
@@ -60,7 +53,7 @@ def get_module(root_module, tgt_module_name):
 
 @dataclass
 class _SharedState:
-    output_ptr: Dict[str, Tensor]
+    output_ptr: Dict[str, List[Tensor]]
     save_ctx: Namespace
     modules: nn.ModuleDict
     offload_mode: str
@@ -113,6 +106,8 @@ class FlexModel(nn.Module):
     :var int tp_size: Tensor parallel dimension size.
     :var int pp_size: Pipeline parallel dimension size.
     :var int dp_size: Data parallel dimension size.
+    :var int offload_mode: Selected device which activation tensors are
+        offloaded to.
 
     :note: Calls to `.backward()` should consider calling :code:`wrapped_module_requires_grad(False)`,
         else the gradient will be generated for the entire wrapped model and
@@ -150,8 +145,8 @@ class FlexModel(nn.Module):
             editing_function=None,
         )
 
-        # Register the hook function.
-        flex_model.register_hook_function(my_hook_function)
+        # Register the hook function (same as PyTorch API).
+        flex_model.register_forward_hook(my_hook_function)
 
         # Run forward pass. Output dictionary will become populated.
         outputs = flex_model(inputs)
@@ -161,7 +156,7 @@ class FlexModel(nn.Module):
     def __init__(
         self,
         module: nn.Module,
-        output_ptr: Dict[str, Tensor],
+        output_ptr: Dict[str, List[Tensor]],
         tensor_parallel_size: int = 1,
         pipeline_parallel_size: int = 1,
         data_parallel_size: int = 1,
@@ -171,13 +166,15 @@ class FlexModel(nn.Module):
 
         :param nn.Module module: :code:`nn.Module` to wrap and apply hooks to.
         :param output_ptr: Output dictionary to dump activations to.
-        :type output_ptr: Dict[str, Tensor]
+        :type output_ptr: Dict[str, List[Tensor]]
         :param int tensor_parallel_size: Number of workers in each tensor
             parallel group.
         :param int pipeline_parallel_size: Number of workers in each pipeline
             parallel group.
         :param int data_parallel_size: Number of processes in each data
             parallel group.
+        :param str offload_mode: Device which activation tensors are offloaded
+            to. Valid modes are currently "CPU" and "GPU".
         """
         super().__init__()
         self.module = module
@@ -199,8 +196,8 @@ class FlexModel(nn.Module):
             )
             dist.initialize_activation_parallel()
 
-        global _OFFLOAD_MODES
-        assert offload_mode in _OFFLOAD_MODES
+        self._offload_modes = {"CPU", "GPU"}
+        assert offload_mode in self._offload_modes
         self.offload_mode = offload_mode
 
         # Create shared state between FM instance and HF instances.
@@ -227,22 +224,22 @@ class FlexModel(nn.Module):
         return self.module
 
     @functools.singledispatchmethod
-    def make_group(self, group_constructor):
+    def _make_group(self, group_constructor):
         raise NotImplementedError(f"Cannot make group using: {group_constructor}")
 
-    @make_group.register
+    @_make_group.register
     def _(self, group_constructor: str):
         # TODO: Pattern match module names for already-registered hook functions.
         raise NotImplementedError
 
-    @make_group.register
+    @_make_group.register
     def _(self, group_constructor: list, group_alias: str):
         # TODO: Construct group explicitly using hook functions.
         raise NotImplementedError
 
     def _register_hook_impl(self, hook_function: HookFunction) -> None:
         """Registers hook to underlying pytorch module."""
-        module = get_module(self.module, hook_function.module_name)
+        module = _get_module(self.module, hook_function.module_name)
 
         # Register hook function to pt module.
         register_fn = getattr(
@@ -252,8 +249,8 @@ class FlexModel(nn.Module):
         self.hook_functions["all"][module][hook_function] = handle
 
     def _hook_registration_prologue(
-        self, hook_function: HookFunction, hook_type: str, lazy: bool
-    ):
+        self, hook_function: HookFunction, hook_type: str
+    ) -> None:
         """Validate hook function and set state."""
         # Validate hook function.
         if (
@@ -277,26 +274,40 @@ class FlexModel(nn.Module):
         # Pass to registration impl.
         self._register_hook_impl(hook_function)
 
-    def register_forward_hook(self, hook_function: HookFunction, lazy=False) -> None:
-        self._hook_registration_prologue(hook_function, "forward", lazy)
+    def register_forward_hook(self, hook_function: HookFunction) -> None:
+        """Register a forward hook function.
 
-    def register_full_backward_hook(
-        self, hook_function: HookFunction, lazy=False
-    ) -> None:
-        self._hook_registration_prologue(hook_function, "full_backward", lazy)
+        :param HookFunction hook_function: `HookFunction` instance to register.
+        """
+        self._hook_registration_prologue(hook_function, "forward")
 
-    def register_hook(self, hook_function: HookFunction, lazy=False) -> None:
-        self._hook_registration_prologue(hook_function, "tensor", lazy)
+    def register_full_backward_hook(self, hook_function: HookFunction) -> None:
+        """Register a backward hook function.
 
-    def register_forward_pre_hook(
-        self, hook_function: HookFunction, lazy=False
-    ) -> None:
-        self._hook_registration_prologue(hook_function, "forward_pre", lazy)
+        :param HookFunction hook_function: `HookFunction` instance to register.
+        """
+        self._hook_registration_prologue(hook_function, "full_backward")
 
-    def register_full_backward_pre_hook(
-        self, hook_function: HookFunction, lazy=False
-    ) -> None:
-        self._hook_registration_prologue(hook_function, "backward_pre", lazy)
+    def register_hook(self, hook_function: HookFunction) -> None:
+        """Register a backward hook function on a tensor.
+
+        :param HookFunction hook_function: `HookFunction` instance to register.
+        """
+        self._hook_registration_prologue(hook_function, "tensor")
+
+    def register_forward_pre_hook(self, hook_function: HookFunction) -> None:
+        """Register a pre-forward hook function.
+
+        :param HookFunction hook_function: `HookFunction` instance to register.
+        """
+        self._hook_registration_prologue(hook_function, "forward_pre")
+
+    def register_full_backward_pre_hook(self, hook_function: HookFunction) -> None:
+        """Register a pre-backward hook function.
+
+        :param HookFunction hook_function: `HookFunction` instance to register.
+        """
+        self._hook_registration_prologue(hook_function, "backward_pre")
 
     def _enable_group_hooks(self, group: str):
         for m, hook_fn_to_handle in self.hook_functions[group].items():
@@ -328,7 +339,9 @@ class FlexModel(nn.Module):
             else:
                 self.output_ptr = {}
 
-    def forward(self, *args, _group: str = "all", **kwargs):
+    def forward(self, *args, _group: str = "all", **kwargs) -> Any:
+        """Run a forward pass of the model with hooks enabled by default."""
+        # TODO: Extend for group pattern matching.
         self._enable_group_hooks(_group)
 
         outputs = self.module(*args, **kwargs)

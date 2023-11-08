@@ -86,10 +86,14 @@ def test_backward_hooks_FairscaleLayers():
 
     if dist.get_rank() == 0:
         assert torch.allclose(
-            output_dict["column_parallel_linear"], output_dict["col_linear"], atol=1e-7
+            output_dict["column_parallel_linear"][0],
+            output_dict["col_linear"][0],
+            atol=1e-7,
         )
         assert torch.allclose(
-            output_dict["row_parallel_linear"], output_dict["row_linear"], atol=1e-7
+            output_dict["row_parallel_linear"][0],
+            output_dict["row_linear"][0],
+            atol=1e-7,
         )
         logger.info("Tests successful.")
 
@@ -139,18 +143,22 @@ def test_forward_hooks_FairscaleLayers():
 
     if dist.get_rank() == 0:
         assert torch.allclose(
-            output_dict["vocab_parallel_embedding"],
-            output_dict["vocab_embedding"],
+            output_dict["vocab_parallel_embedding"][0],
+            output_dict["vocab_embedding"][0],
             atol=1e-7,
         )
         assert torch.allclose(
-            output_dict["parallel_embedding"], output_dict["embedding"], atol=1e-7
+            output_dict["parallel_embedding"][0], output_dict["embedding"][0], atol=1e-7
         )
         assert torch.allclose(
-            output_dict["column_parallel_linear"], output_dict["col_linear"], atol=1e-7
+            output_dict["column_parallel_linear"][0],
+            output_dict["col_linear"][0],
+            atol=1e-7,
         )
         assert torch.allclose(
-            output_dict["row_parallel_linear"], output_dict["row_linear"], atol=1e-7
+            output_dict["row_parallel_linear"][0],
+            output_dict["row_linear"][0],
+            atol=1e-7,
         )
         logger.info("Tests successful.")
 
@@ -201,18 +209,22 @@ def test_gpu_offload_FairscaleLayers():
 
     if dist.get_rank() == 0:
         assert torch.allclose(
-            output_dict["vocab_parallel_embedding"],
-            output_dict["vocab_embedding"],
+            output_dict["vocab_parallel_embedding"][0],
+            output_dict["vocab_embedding"][0],
             atol=1e-7,
         )
         assert torch.allclose(
-            output_dict["parallel_embedding"], output_dict["embedding"], atol=1e-7
+            output_dict["parallel_embedding"][0], output_dict["embedding"][0], atol=1e-7
         )
         assert torch.allclose(
-            output_dict["column_parallel_linear"], output_dict["col_linear"], atol=1e-7
+            output_dict["column_parallel_linear"][0],
+            output_dict["col_linear"][0],
+            atol=1e-7,
         )
         assert torch.allclose(
-            output_dict["row_parallel_linear"], output_dict["row_linear"], atol=1e-7
+            output_dict["row_parallel_linear"][0],
+            output_dict["row_linear"][0],
+            atol=1e-7,
         )
         logger.info("Tests successful.")
 

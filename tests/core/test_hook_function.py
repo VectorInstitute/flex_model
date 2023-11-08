@@ -112,8 +112,8 @@ def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer, offload_mode):
     assert torch.allclose(gt_out.logits, fm_out.logits)
 
     if offload_mode == "CPU":
-        assert torch.allclose(ground_truth.cpu(), activations[MODULE_NAME])
-        assert activations[MODULE_NAME].device.type == "cpu"
+        assert torch.allclose(ground_truth.cpu(), activations[MODULE_NAME][0])
+        assert activations[MODULE_NAME][0].device.type == "cpu"
     else:
-        assert torch.allclose(ground_truth.cuda(), activations[MODULE_NAME])
-        assert activations[MODULE_NAME].device.type == "cuda"
+        assert torch.allclose(ground_truth.cuda(), activations[MODULE_NAME][0])
+        assert activations[MODULE_NAME][0].device.type == "cuda"

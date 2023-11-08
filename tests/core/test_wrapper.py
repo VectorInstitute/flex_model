@@ -143,5 +143,5 @@ def test_save_ctx(opt_350m, opt_tokenizer):
 
     # Verify that the two verions of the same tensor are equal
     assert torch.equal(
-        activations["save_ctx_activation"], activations["model.decoder.layers.12"],
+        activations["save_ctx_activation"], activations["model.decoder.layers.12"][0],
     )

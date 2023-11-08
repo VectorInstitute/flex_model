@@ -36,7 +36,7 @@ def _add_profile_args(parser):
     group.add_argument("--profile_wait_steps", type=int, default=1)
     group.add_argument("--profile_dir", type=str)
     group.add_argument("--profile_row_limit", type=int, default=5)
-    group.add_argument("--profile_force", type=str)
+    group.add_argument("--profile_force_exp", type=str)
     return parser
 
 
@@ -112,6 +112,12 @@ def validate_args(args):
         if not os.path.isdir(args.profile_dir):
             os.makedirs(args.profile_dir, exist_ok=True)
 
+    args.exp_prefix = ""
+    if args.single_gpu_only:
+        args.exp_prefix = "single_gpu"
+    elif args.multi_gpu_only:
+        args.exp_prefix = "multi_gpu"
+
     return args
 
 
@@ -135,14 +141,7 @@ def main(args):
 
     # Construct experiment setup functions and create profile folders.
     manager = ExperimentNetworkManager()
-    experiments = manager.named_experiments
-
-    prefix = ""
-    if args.single_gpu_only:
-        prefix = "single_gpu"
-    elif args.multi_gpu_only:
-        prefix = "multi_gpu"
-    experiments = [getattr(manager, e) for e in experiments if e.startswith(prefix)]
+    experiments = manager.get_experiment_handles(args.exp_prefix)
 
     for exp in experiments:
         os.makedirs(f"{args.profile_dir}/{exp.__name__}", exist_ok=True)
@@ -167,11 +166,13 @@ def main(args):
                 num_steps, args.batch_size, model_dim, dtype=dtype
             ).cuda()
 
+            # Need to spoof Megatron-LM config so we can use the Col and Row
+            # parallel layers.
             spoof_config = spoof_megatron_config(dtype)
 
             for exp in experiments:
                 exp_name = exp.__name__
-                if args.profile_force and exp_name != args.profile_force:
+                if args.profile_force_exp and exp_name != args.profile_force_exp:
                     continue
 
                 if args.profile_save_profile:

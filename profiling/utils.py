@@ -6,13 +6,16 @@ import random
 import time
 from collections import defaultdict
 from itertools import chain
+from typing import Callable, List
 
 import megatron.core.parallel_state as mpu
 import numpy as np
 import torch
 import torch.nn as nn
 import wandb
-from megatron.core.parallel_state import initialize_model_parallel
+from megatron.core.parallel_state import (
+    initialize_model_parallel as initialize_megatron_model_parallel,
+)
 from megatron.core.tensor_parallel import (
     ColumnParallelLinear,
     RowParallelLinear,
@@ -24,6 +27,14 @@ from flex_model.core import FlexModel, HookFunction
 
 
 class TestNetwork(nn.Module):
+    """Network for running profiling experiments against.
+
+    Layers are either `nn.Linear` layers, or alternating `ColumnParallelLinear`
+    and `RowParallelLinear` layers. ReLU activation functions are placed every
+    two layers too. Will be deprecated in future releases in-favour of
+    canonical Megatron-LM models.
+    """
+
     def __init__(self, model_dim, n_layers, is_distributed, config):
         super().__init__()
         self.model_dim = model_dim
@@ -139,9 +150,12 @@ def hook_function_cpu_gather_scatter(self, inputs, outputs, acc, name):
         gather_fn = lambda x: x
         scatter_fn = lambda x: x
 
-    else:
+    elif isinstance(self, nn.Linear):
         gather_fn = lambda x: x
         scatter_fn = lambda x: x
+
+    else:
+        raise NotImplementedError
 
     _outputs = gather_fn(_outputs)
 
@@ -175,6 +189,13 @@ class ExperimentNetworkManager:
 
         self.hook_handles = defaultdict(list)
         self.network_cache = None
+
+    def get_experiment_handles(self, prefix: str) -> List[Callable]:
+        experiments = list(
+            filter(lambda name: name.startswith(prefix), self.named_experiments,)
+        )
+        experiment_handles = [getattr(self, e) for e in experiments]
+        return experiment_handles
 
     def cleanup(self):
         self.cpu_acc.clear()
@@ -329,8 +350,8 @@ class ExperimentNetworkManager:
 def init_megatron_dist(args):
     """Initialize Megatron-LM parallel state."""
     os.environ["NCCL_IB_DISABLE"] = "1"
-    initialize_distributed()
-    initialize_model_parallel(args.tp_size)
+    initialize_torch_distributed()
+    initialize_megatron_model_parallel(args.tp_size)
 
     # Taken from: https://github.com/NVIDIA/Megatron-LM/blob/feac76a79148622d8f2a45d46c08a972a24784a3/megatron/initialize.py#L236
     seed = 0
@@ -342,7 +363,7 @@ def init_megatron_dist(args):
         model_parallel_cuda_manual_seed(0)
 
 
-def initialize_distributed():
+def initialize_torch_distributed():
     """Initialize torch distributed state."""
     device = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(device)
