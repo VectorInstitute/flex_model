@@ -3,7 +3,7 @@ Run `pip install -e .` from the root directory.
 
 # Important Notes
 - Make sure to replace any instances of `module.forward(inputs)` with
-`module(inputs)`. The forward hooks are not run if you directly call
+`module(inputs)`. The forward hooks are not run by PyTorch if you directly call
 the forward function of a module (this is the case with LLaMA).
 
 # Usage
@@ -27,7 +27,7 @@ model = FlexModel(
 	output_dict,
 	tensor_parallel_size=1,
 	pipeline_parallel_size=1,
-	data_parallel_size=2,		# For FSDP over 2 DP workers
+	data_parallel_size=4,		# For FSDP over 4 GPUs
 )
 
 # Only need to provide a shape hint on the dimension which may be sharded
@@ -56,37 +56,22 @@ hook_function = HookFunction(
 )
 
 # Register the hook function into our model
-flex_model.register_hook_function(hook_function)
+flex_model.register_forward_hook(hook_function)
 
 # Run a forward pass, activations will be placed in the output_dict
 model.forward(inputs)
 ```
 
 # Running Tests
-Use `torchrun` to run all of the tests requiring distributed. Else you can just
-use `python3`. All distributed tests were done on 2-4 GPUs.
+Running single-gpu tests in the `tests/` folder using `pytest` can be done with
+the command:
 ```
-torchrun --nnodes 1 \
-	--nproc_per_node <2 or 4> \
-	--rdzv_id 6969 \
-	--rdzv_backend c10d \
-	--rdzv_endpoint <gpuXXX> \
-	--test_<name>.py
+pytest --ignore=multi_gpu
 ```
 
-# Running TunedLens
-Here's an example command to do a training run of TunedLens using the
-FlexModel backend to retrieve weights and activations. The implementation is
-basic and does not do any checkpointing. For full launch options, check out
-the `test_tunedlens.py` script.
+Multi-gpu tests are run via `submitit` on a `slurm` cluster. Navigate to
+`tests/multi_gpu` and run the command:
 ```
-torchrun --nnodes 1 \
-	--nproc_per_node 2 \
-	--rdzv_id 6969 \
-	--rdzv_backend c10d \
-	--rdzv_endpoint <gpuXXX> \
-	--test_tunedlens.py \
-	--log_level warning \
-	--batch_size 16 \
-	--num_steps 250
+python run_multi_gpu_tests_slurm.py
 ```
+The multi-gpu tests require 4 GPUs to run.

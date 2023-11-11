@@ -166,7 +166,9 @@ class _HookFunctionGroupManager:
         self, group_constructor: list, group_name: str
     ) -> None:
         are_hook_fns = map(lambda x: isinstance(x, HookFunction), group_constructor)
-        assert all(are_hook_fns), f"set_group takes a collection of only HookFunctions"
+        assert all(
+            are_hook_fns
+        ), f"remove (list) takes a collection of only HookFunctions"
         assert group_name != "all", "Can't remove 'all' group references"
 
         for hook_fn in group_constructor:
@@ -179,6 +181,7 @@ class _HookFunctionGroupManager:
     def _remove_by_hook_fn(
         self, group_constructor: HookFunction, group_name: str
     ) -> None:
+        assert group_name != "all", "Can't remove 'all' group references"
         self.hook_fn_to_groups_map[group_constructor].remove(group_name)
 
         if not self._is_group_alive(group_name):
@@ -186,6 +189,7 @@ class _HookFunctionGroupManager:
 
     @remove.register
     def _remove_by_string(self, group_constructor: str, group_name: str) -> None:
+        assert group_name != "all", "Can't remove 'all' group references"
         hook_functions_to_remove = []
         for hook_fn, groups in self.hook_fn_to_groups_map.items():
             if group_constructor in hook_fn.module_name:
@@ -219,7 +223,11 @@ class _HookFunctionGroupManager:
         return active_hook_fns, inactive_hook_fns
 
 
-def _finalize_dangling_state(hook_functions) -> None:
+def _finalize_dangling_state(
+    hook_functions: Dict[
+        Union[nn.Module, Tensor], Dict[HookFunction, torch.utils.hooks.RemovableHandle],
+    ]
+) -> None:
     """Clear persistent state when FlexModel is garbage collected."""
     # Remove hook functions from model.
     for m, hf_to_handle in hook_functions.items():
@@ -243,6 +251,8 @@ class FlexModel(nn.Module):
     :note: Supported features include:
 
         * Registry, enabling and disabling of :class:`HookFunction` instances.
+        * Creation of :class:`HookFunction` groups, which may be selectively
+            activated during model forward passes.
         * Exposing global states to all :class:`Hookfunction` runtimes.
         * Distributed orchestration of 1-D to 3-D parallelisms.
         * Providing convenience functions for various attributes.
@@ -338,7 +348,6 @@ class FlexModel(nn.Module):
         super().__init__()
         self.module = module
 
-        # Map: submodule -> hook functions -> hook handle.
         self.output_ptr = output_ptr
         self.save_ctx: Namespace = Namespace()  # dumb Namespace for now
         self.trainable_modules = nn.ModuleDict()
@@ -372,6 +381,7 @@ class FlexModel(nn.Module):
             "forward_pre": "register_forward_pre_hook",
             "backward_pre": "register_full_backward_pre_hook",
         }
+        # Map: submodule -> hook functions -> hook handle.
         self._module_to_hook_fns_map: Dict[
             Union[nn.Module, Tensor],
             Dict[HookFunction, torch.utils.hooks.RemovableHandle],
@@ -382,14 +392,14 @@ class FlexModel(nn.Module):
             self, _finalize_dangling_state, self._module_to_hook_fns_map,
         )
 
-    def _enable_hooks(self, active_hooks: Set[HookFunction]):
+    def _enable_hooks(self, active_hooks: Set[HookFunction]) -> None:
         """Sink selected hooks into associated submodules."""
         for module, hook_fn_to_handle in self._module_to_hook_fns_map.items():
             for hook_fn, handle in hook_fn_to_handle.items():
                 if handle is None and hook_fn in active_hooks:
                     self._register_hook_impl(module, hook_fn)
 
-    def _disable_hooks(self, hooks: Set[HookFunction]):
+    def _disable_hooks(self, hooks: Set[HookFunction]) -> None:
         """Pull selected hooks out of associated submodules."""
         for module, hook_fn_to_handle in self._module_to_hook_fns_map.items():
             for hook_fn, handle in hook_fn_to_handle.items():
@@ -421,7 +431,14 @@ class FlexModel(nn.Module):
         complement: bool = False,
         **kwargs,
     ) -> Any:
-        """Run a forward pass of the model with hooks enabled by default."""
+        """Run a forward pass of the model with all hooks active by default.
+
+        :param groups: `HookFunction` groups to activate during the forward
+            pass.
+        :type groups: Union[str, List[str]]
+        :param bool complement: If `True`, then the `HookFunctions` groups
+            passed in the `group` argument are *not* active.
+        """
         active, inactive = self._hook_fn_group_manager.bisect(groups)
 
         if not complement:
@@ -480,7 +497,7 @@ class FlexModel(nn.Module):
         # Pass to registration impl.
         self._register_hook_impl(hook_function)
 
-    def get_hook_function_groups(self, hook_function: HookFunction):
+    def get_hook_function_groups(self, hook_function: HookFunction) -> Set[str]:
         """Get a collection of groups that the `hook_function` belongs to.
 
         :param HookFunction hook_function: `HookFunction` to fetch related
@@ -488,7 +505,7 @@ class FlexModel(nn.Module):
         """
         return self._hook_fn_group_manager.get_hook_fn_groups(hook_function)
 
-    def get_group_hook_functions(self, group_name: str):
+    def get_group_hook_functions(self, group_name: str) -> List[HookFunction]:
         """Get a collection of `HookFunction`s that belong in the given group.
 
         :param str group_name: Group to fetch related `HookFunction`s from.
