@@ -145,3 +145,86 @@ def test_save_ctx(opt_350m, opt_tokenizer):
     assert torch.equal(
         activations["save_ctx_activation"], activations["model.decoder.layers.12"][0],
     )
+
+
+def test_FlexModel_group_all(opt_350m):
+    model = opt_350m.cuda()
+
+    activations = {}
+    model = FlexModel(model, activations)
+
+    layers = [
+        f"model.decoder.layers.{i}"
+        for i in range(len(model.module.model.decoder.layers))
+    ]
+    hook_functions = [HookFunction(name, (None, None, None)) for name in layers]
+    for hf in hook_functions:
+        model.register_forward_hook(hf)
+
+    manager = model._hook_fn_group_manager
+    assert len(manager.hook_fn_to_groups_map) == len(hook_functions)
+    for hf, group in manager.hook_fn_to_groups_map.items():
+        assert group == set(["all"])
+
+
+def test_FlexModel_group_creation(opt_350m, opt_tokenizer):
+    model = opt_350m.cuda()
+    prompts = [
+        "It's a nice day we're having",
+        "The capital of Canada is",
+        "What should I eat for dinner tonight?",
+        "There's about three people going to",
+    ]
+    inputs = opt_tokenizer(prompts, padding=True, return_tensors="pt")[
+        "input_ids"
+    ].cuda()
+
+    activations = {}
+    model = FlexModel(model, activations)
+
+    layers = [
+        f"model.decoder.layers.{i}"
+        for i in range(len(model.module.model.decoder.layers))
+    ]
+
+    # Run the model forward pass on a group, on the hook functions not in the
+    # group, and on all hook functions.
+    model.create_hook_group(
+        "new_group", "self_attn", (None, None, None),
+    )
+
+    _ = model(inputs)
+
+    all_group_tensors = {**activations}
+    activations.clear()
+
+    _ = model(inputs, groups="new_group")
+
+    for name, tensor in activations.items():
+        assert "self_attn" in name
+
+    new_group_tensors = {**activations}
+    activations.clear()
+
+    _ = model(inputs, groups="new_group", complement=True)
+
+    non_new_group_tensors = {**activations}
+    activations.clear()
+
+    assert len(all_group_tensors) == len(new_group_tensors) + len(non_new_group_tensors)
+    for name, tensor in all_group_tensors.items():
+        assert name in new_group_tensors or name in non_new_group_tensors
+        if name in new_group_tensors:
+            new_ten = new_group_tensors.pop(name)
+            assert torch.allclose(tensor, new_ten)
+        else:
+            non_new_ten = non_new_group_tensors.pop(name)
+            assert torch.allclose(tensor, non_new_ten)
+
+    assert len(new_group_tensors) == 0
+    assert len(non_new_group_tensors) == 0
+
+    for hook_fn, groups in model._hook_fn_group_manager.hook_fn_to_groups_map.items():
+        if "self_attn" in hook_fn.module_name:
+            assert "new_group" in groups
+        assert "all" in groups

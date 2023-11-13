@@ -40,6 +40,14 @@ def opt_350m() -> nn.Module:
     return model
 
 
+@pytest.fixture(scope="session")
+def opt_350m_module_names():
+    model = AutoModelForCausalLM.from_pretrained(
+        "/model-weights/opt-350m", local_files_only=True, torch_dtype=torch.bfloat16,
+    )
+    return [n for n, _ in model.named_modules()]
+
+
 @pytest.fixture
 def opt_tokenizer():
     tokenizer = AutoTokenizer.from_pretrained(
