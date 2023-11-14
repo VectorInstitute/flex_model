@@ -9,8 +9,8 @@ _MULTIGPU_RESOURCE_SPECS = None
 class SlurmJobResourceSpec:
     """Resource specification for a single slurm job."""
 
-    partition: str = "a100"
-    qos: str = "a100_mchoi"
+    partition: str = "a40"
+    qos: str = "m"
     # python: str = "/h/mchoi/projects/dl_lc/dl_lc_env/bin/python3.9"
     time: int = 5
     mem: Optional[str] = None

@@ -20,7 +20,7 @@ from flex_model.utils import setup_logger
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--log_level", type=str, default="info")
+    parser.add_argument("--log_level", type=str, default="debug")
     parser.add_argument(
         "--checkpoint_dir", type=str, default="/model-weights/Llama-2-13b"
     )
@@ -99,8 +99,12 @@ def main(args):
     # Activations are only dumped to main process. Activations per-module key
     # are accumulated in a list.
     if torch.distributed.get_rank() == 0:
-        print(f"Activation shape: {activation_dict[module_name][0].shape}")
-        print(activation_dict[module_name][0])
+        activation = activation_dict[module_name][0]
+        print(f"Activation shape: {activation.shape}")
+        print(activation)
+
+        assert activation.shape[0] == 4
+        assert activation.shape[-1] == 13824
 
 
 if __name__ == "__main__":

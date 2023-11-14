@@ -31,14 +31,16 @@ def llama_tokenizer() -> LlamaTokenizer:
 
 
 @pytest.fixture
-def opt_350m() -> nn.Module:
-    model = AutoModelForCausalLM.from_pretrained(
-        "/model-weights/opt-350m",
-        local_files_only=True,
-        torch_dtype=torch.bfloat16,
-    )
+def make_opt_350m() -> nn.Module:
+    def _make_opt_350m():
+        model = AutoModelForCausalLM.from_pretrained(
+            "/model-weights/opt-350m",
+            local_files_only=True,
+            torch_dtype=torch.bfloat16,
+        )
+        return model
 
-    return model
+    yield _make_opt_350m
 
 
 @pytest.fixture(scope="session")

@@ -192,34 +192,28 @@ def parse_collect_and_distribute_from_tensor(
 
     # Define helper functions for collection/dispersion.
     def _gather_only_tp(t):
-        dist.all_gather_tensor_parallel(t, dim=sharded_dim)
-        return t
+        return dist.all_gather_tensor_parallel(t, dim=sharded_dim)
 
     def _scatter_only_tp(t):
-        dist.scatter_tensor_parallel(t, dim=sharded_dim)
-        return t
+        return dist.scatter_tensor_parallel(t, dim=sharded_dim)
 
     def _gather_only_dp(t):
-        dist.all_gather_data_parallel(t, dim=0)
-        return t
+        return dist.all_gather_data_parallel(t, dim=0)
 
     def _scatter_only_dp(t):
-        dist.scatter_data_parallel(t, dim=0)
-        return t
+        return dist.scatter_data_parallel(t, dim=0)
 
     def _gather_tp_then_dp(t):
-        dist.all_gather_data_parallel(
+        return dist.all_gather_data_parallel(
             dist.all_gather_tensor_parallel(t, dim=sharded_dim),
             dim=0,
         )
-        return t
 
     def _scatter_dp_then_tp(t):
-        dist.scatter_tensor_parallel(
+        return dist.scatter_tensor_parallel(
             dist.scatter_data_parallel(t, dim=0),
             dim=sharded_dim,
         )
-        return t
 
     # Pure TP: Activation maybe sharded over TP, no-op DP.
     if tp_world_size > 1 and dp_world_size == 1:

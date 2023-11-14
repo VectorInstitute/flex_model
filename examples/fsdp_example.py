@@ -23,10 +23,12 @@ from transformers import LlamaForCausalLM, LlamaTokenizerFast
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
 from flex_model.core import FlexModel, HookFunction
+from flex_model.utils import setup_logger
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--log_level", type=str, default="debug")
     parser.add_argument(
         "--checkpoint_dir", type=str, default="/model-weights/Llama-2-13b-hf"
     )
@@ -50,7 +52,31 @@ def get_llama2_tokenizer(tokenizer_dir):
     return tokenizer
 
 
-def wrap_llama2_fsdp(base_model):
+def wrap_llama2_fsdp(args):
+    # Load llama-2 model and prepare it for FSDP (CPU RAM-efficient)
+    if dist.get_rank() == 0:
+        base_model = LlamaForCausalLM.from_pretrained(
+            args.checkpoint_dir,
+            local_files_only=True,
+            torch_dtype=torch.bfloat16,
+        )
+        param_init_fn = None
+    else:
+        with torch.device("meta"):
+            base_model = LlamaForCausalLM.from_pretrained(
+                args.checkpoint_dir,
+                local_files_only=True,
+                torch_dtype=torch.bfloat16,
+            )
+
+        def _param_init_fn(module: nn.Module):
+            module = module.to_empty(
+                device=torch.cuda.current_device(), recurse=False
+            )
+            return module
+
+        param_init_fn = _param_init_fn
+
     # Initialize fsdp options.
     backward_prefetch = BackwardPrefetch.BACKWARD_PRE
 
@@ -66,18 +92,6 @@ def wrap_llama2_fsdp(base_model):
 
     # Don't offload to CPU.
     cpu_offload = CPUOffload(offload_params=False)
-
-    def _param_init_fn(module: nn.Module):
-        module = module.to_empty(
-            device=torch.cuda.current_device()
-        )  # , recurse=False)
-        return module
-
-    # Memory-efficient init., materialize full model params once on CPU RAM.
-    if dist.get_rank() == 0:
-        param_init_fn = None
-    else:
-        param_init_fn = _param_init_fn
 
     transformer_auto_wrapper_policy = functools.partial(
         transformer_auto_wrap_policy,
@@ -117,6 +131,8 @@ def main(args):
     This script must be run via Huggingface Accelerate FSDP. Retrieves
     activations over all DP-workers by gathering them in the batch dimension.
     """
+    setup_logger("debug")
+
     init_dist()
 
     rank = dist.get_rank()
@@ -129,14 +145,7 @@ def main(args):
         "There's about three people going to",
     ]
 
-    # Load llama-2-13b-hf model and prepare it for FSDP
-    model = LlamaForCausalLM.from_pretrained(
-        args.checkpoint_dir,
-        local_files_only=True,
-        low_cpu_mem_usage=True,
-        torch_dtype=torch.bfloat16,
-    )
-    model = wrap_llama2_fsdp(model)
+    model = wrap_llama2_fsdp(args)
 
     # Load tokenizer
     tokenizer = get_llama2_tokenizer(args.tokenizer_dir)
@@ -177,8 +186,12 @@ def main(args):
 
     # Activations are only dumped to main process
     if rank == 0:
-        print(f"Activation shape: {activation_dict[module_name][0].shape}")
-        print(activation_dict[module_name][0])
+        activation = activation_dict[module_name][0]
+        print(f"Activation shape: {activation.shape}")
+        print(activation)
+
+        assert activation.shape[0] == 4
+        assert activation.shape[-1] == 5120
 
 
 if __name__ == "__main__":

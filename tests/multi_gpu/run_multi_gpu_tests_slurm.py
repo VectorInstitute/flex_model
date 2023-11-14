@@ -98,6 +98,7 @@ class MultiGPUSlurmJob:
 
 def main():
     # Import folders to register tests.
+    from tests.multi_gpu import core, distributed  # noqa: F401
 
     test_registries = get_multigpu_test_registry()
 

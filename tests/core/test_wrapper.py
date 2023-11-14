@@ -15,12 +15,12 @@ PROMPTS = [
 ]
 
 
-def test_register_forward_hook(opt_350m):
+def test_register_forward_hook(make_opt_350m):
     """
     Tests if a hook function is registered correctly, and if the fields are set
     appropriately.
     """
-    model = opt_350m.cuda()
+    model = make_opt_350m().cuda()
 
     activations = {}
     model = FlexModel(
@@ -40,13 +40,13 @@ def test_register_forward_hook(opt_350m):
     assert my_hook_function._shared_state.offload_mode == "CPU"
 
 
-def test_register_trainable_module(opt_350m):
+def test_register_trainable_module(make_opt_350m):
     """
     Tests if a trainable module is registered correctly, and that all hook
     functions (regardless of when they're added), have a pointer to this
     module.
     """
-    model = opt_350m.cuda()
+    model = make_opt_350m().cuda()
 
     activations = {}
     trainable_module = nn.Linear(420, 69, bias=False).cuda()
@@ -69,11 +69,11 @@ def test_register_trainable_module(opt_350m):
     assert my_hook_function_2._shared_state.modules["test"] is trainable_module
 
 
-def test_destroy(opt_350m):
+def test_destroy(make_opt_350m):
     """
     Tests the destroy method to ensure everything is cleared appropriately.
     """
-    model = opt_350m.cuda()
+    model = make_opt_350m().cuda()
 
     activations = {}
     trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
@@ -108,8 +108,8 @@ def test_destroy(opt_350m):
             assert len(getattr(m, attr)) == 0
 
 
-def test_save_ctx(opt_350m, opt_tokenizer):
-    model = opt_350m.cuda()
+def test_save_ctx(make_opt_350m, opt_tokenizer):
+    model = make_opt_350m().cuda()
 
     tokenizer = opt_tokenizer
 
@@ -163,8 +163,8 @@ def test_save_ctx(opt_350m, opt_tokenizer):
     )
 
 
-def test_FlexModel_group_all(opt_350m):
-    model = opt_350m.cuda()
+def test_FlexModel_group_all(make_opt_350m):
+    model = make_opt_350m().cuda()
 
     activations = {}
     model = FlexModel(model, activations)
@@ -183,8 +183,8 @@ def test_FlexModel_group_all(opt_350m):
         assert group == set(["all"])
 
 
-def test_FlexModel_group_creation(opt_350m, opt_tokenizer):
-    model = opt_350m.cuda()
+def test_FlexModel_group_creation(make_opt_350m, opt_tokenizer):
+    model = make_opt_350m().cuda()
     prompts = [
         "It's a nice day we're having",
         "The capital of Canada is",
