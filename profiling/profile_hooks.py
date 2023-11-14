@@ -106,6 +106,7 @@ def validate_args(args):
         if not os.path.isdir(args.profile_dir):
             os.makedirs(args.profile_dir, exist_ok=True)
 
+    # Select a subset of experiments to run.
     args.exp_prefix = ""
     if args.single_gpu_only:
         args.exp_prefix = "single_gpu"

@@ -30,6 +30,13 @@ indent-width = 4
 # Assume Python 3.9
 target-version = "py39"
 
+# Avoid removing imports from __init__.py files.
+ignore-init-module-imports = true
+
+# Ignore `E402` (import violations) in all `__init__.py` files, and in `path/to/file.py`.
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
 [lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
 # Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
@@ -56,4 +63,3 @@ skip-magic-trailing-comma = false
 
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
-
