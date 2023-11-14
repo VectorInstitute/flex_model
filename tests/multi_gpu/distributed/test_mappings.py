@@ -1,9 +1,6 @@
 import logging
 
-import fairscale.nn.model_parallel as mpu
-import pytest
 import torch
-import torch.distributed as dist
 
 import flex_model.distributed as fm_dist
 from tests.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
@@ -13,7 +10,11 @@ logger = logging.getLogger(__name__)
 
 
 register_mappings_test, get_mappings_test = make_test_registry(
-    "mappings", SlurmJobResourceSpec(gpus_per_node=2, ntasks_per_node=2,),
+    "mappings",
+    SlurmJobResourceSpec(
+        gpus_per_node=2,
+        ntasks_per_node=2,
+    ),
 )
 
 
@@ -144,11 +145,17 @@ def test_batch_isend_irecv_pipeline_parallel():
     recv_from_ranks = [(rank + 1) % world_size]
 
     fm_dist.batch_isend_irecv_pipeline_parallel(
-        recv_tensors, recv_from_ranks, send_tensors, send_to_ranks,
+        recv_tensors,
+        recv_from_ranks,
+        send_tensors,
+        send_to_ranks,
     )
 
     for tensor in recv_tensors:
-        assert torch.equal(tensor, torch.ones((1,)).cuda() * (rank + 1) % world_size,)
+        assert torch.equal(
+            tensor,
+            torch.ones((1,)).cuda() * (rank + 1) % world_size,
+        )
 
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()
@@ -182,7 +189,8 @@ def test_gather_pipeline_parallel_base():
         assert len(result) == tensors_per_rank * world_size
         for tensor_idx in range(world_size * tensors_per_rank):
             assert torch.equal(
-                result[f"tensor_{tensor_idx}"], torch.ones((1,)) * tensor_idx,
+                result[f"tensor_{tensor_idx}"],
+                torch.ones((1,)) * tensor_idx,
             )
 
     Utils.destroy_activation_parallel()
@@ -218,7 +226,10 @@ def test_gather_pipeline_parallel_dtypes():
                 tensor_idx = rank * tensors_per_rank + i
                 name = f"tensor_{tensor_idx}_{dtype}"
                 tensor = torch.ones((1,), dtype=dtype)
-                assert torch.equal(result[name], tensor,)
+                assert torch.equal(
+                    result[name],
+                    tensor,
+                )
 
     Utils.destroy_activation_parallel()
     Utils.destroy_distributed_backend()

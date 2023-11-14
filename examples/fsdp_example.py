@@ -1,3 +1,11 @@
+"""Runs Llama-2-13B on 2 GPUs using PyTorch's FSDP wrapper. This script
+demonstrates basic usage of the `FlexModel` wrapper with a generic
+`HookFunction`.
+
+Running:
+
+torchrun --nodes 1 --nproc_per_node 2 fsdp_example.py
+"""
 import argparse
 import functools
 import os
@@ -31,7 +39,8 @@ def parse_args():
 
 def get_llama2_tokenizer(tokenizer_dir):
     tokenizer = LlamaTokenizerFast.from_pretrained(
-        tokenizer_dir, local_files_only=True,
+        tokenizer_dir,
+        local_files_only=True,
     )
     tokenizer.model_max_length = 512
 
@@ -69,7 +78,8 @@ def wrap_llama2_fsdp(base_model):
         param_init_fn = _param_init_fn
 
     transformer_auto_wrapper_policy = functools.partial(
-        transformer_auto_wrap_policy, transformer_layer_cls={LlamaDecoderLayer},
+        transformer_auto_wrap_policy,
+        transformer_layer_cls={LlamaDecoderLayer},
     )
 
     # Wrap model.
@@ -133,7 +143,11 @@ def main(args):
     activation_dict: Dict[str, List[Tensor]] = {}
 
     # Wrap model in FlexModel
-    model = FlexModel(model, activation_dict, data_parallel_size=world_size,)
+    model = FlexModel(
+        model,
+        activation_dict,
+        data_parallel_size=world_size,
+    )
 
     # Create a hook function
     module_name = "_fsdp_wrapped_module.model.layers.30._fsdp_wrapped_module.mlp"

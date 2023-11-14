@@ -1,11 +1,9 @@
 import logging
 
-import pytest
 import torch
 import torch.distributed as dist
 
 from flex_model.core import FlexModel, HookFunction
-from flex_model.utils import setup_logger
 from tests.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
 from tests.multi_gpu.testing_utils import FairscaleLayers, Utils
 
@@ -13,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 register_fairscale_megatron_test, get_fairscale_megatron_test = make_test_registry(
-    "fairscale_megatron", SlurmJobResourceSpec(),
+    "fairscale_megatron",
+    SlurmJobResourceSpec(),
 )
 
 
@@ -29,7 +28,9 @@ def test_FairscaleLayers():
     batch_size = 4
 
     inputs = torch.randint(
-        low=0, high=vocab_size, size=(batch_size, sequence_length),
+        low=0,
+        high=vocab_size,
+        size=(batch_size, sequence_length),
     ).cuda()
     logger.debug(inputs)
 
@@ -52,7 +53,9 @@ def test_backward_hooks_FairscaleLayers():
     batch_size = 4
 
     inputs = torch.randint(
-        low=0, high=vocab_size, size=(batch_size, sequence_length),
+        low=0,
+        high=vocab_size,
+        size=(batch_size, sequence_length),
     ).cuda()
     logger.debug(inputs)
 
@@ -112,7 +115,9 @@ def test_forward_hooks_FairscaleLayers():
     batch_size = 4
 
     inputs = torch.randint(
-        low=0, high=vocab_size, size=(batch_size, sequence_length),
+        low=0,
+        high=vocab_size,
+        size=(batch_size, sequence_length),
     ).cuda()
     logger.debug(inputs)
 
@@ -177,7 +182,9 @@ def test_gpu_offload_FairscaleLayers():
     batch_size = 4
 
     inputs = torch.randint(
-        low=0, high=vocab_size, size=(batch_size, sequence_length),
+        low=0,
+        high=vocab_size,
+        size=(batch_size, sequence_length),
     ).cuda()
     logger.debug(inputs)
 

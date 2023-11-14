@@ -1,13 +1,9 @@
-from argparse import Namespace
 from functools import partial
 
-import pytest
 import torch
 import torch.nn as nn
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from flex_model.core import FlexModel, HookFunction
-from tests.fixtures import opt_350m, opt_tokenizer
 
 MODULE_NAME_1 = "model.decoder.layers.17.fc2"
 MODULE_NAME_2 = "model.decoder.layers.18.fc2"
@@ -27,7 +23,10 @@ def test_register_forward_hook(opt_350m):
     model = opt_350m.cuda()
 
     activations = {}
-    model = FlexModel(model, activations,)
+    model = FlexModel(
+        model,
+        activations,
+    )
 
     my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None))
 
@@ -73,11 +72,17 @@ def test_destroy(opt_350m):
     activations = {}
     trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
     trainable_module_2 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
-    model = FlexModel(model, activations,)
+    model = FlexModel(
+        model,
+        activations,
+    )
     model.register_trainable_module("test1", trainable_module_1)
     model.register_trainable_module("test2", trainable_module_2)
 
-    my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None),)
+    my_hook_function = HookFunction(
+        MODULE_NAME_1,
+        expected_shape=(None, None, None),
+    )
 
     model.register_forward_hook(my_hook_function)
     model = model.module  # Calls FlexModel.__exit__().
@@ -129,7 +134,9 @@ def test_save_ctx(opt_350m, opt_tokenizer):
         return inputs
 
     retrieve_hook_fn = HookFunction(
-        "model.decoder.layers.12", (None, None, None), retrieve_fn,
+        "model.decoder.layers.12",
+        (None, None, None),
+        retrieve_fn,
     )
     verify_hook_fn = HookFunction(
         "model.decoder.layers.18",
@@ -143,7 +150,8 @@ def test_save_ctx(opt_350m, opt_tokenizer):
 
     # Verify that the two verions of the same tensor are equal
     assert torch.equal(
-        activations["save_ctx_activation"], activations["model.decoder.layers.12"][0],
+        activations["save_ctx_activation"],
+        activations["model.decoder.layers.12"][0],
     )
 
 
@@ -182,15 +190,12 @@ def test_FlexModel_group_creation(opt_350m, opt_tokenizer):
     activations = {}
     model = FlexModel(model, activations)
 
-    layers = [
-        f"model.decoder.layers.{i}"
-        for i in range(len(model.module.model.decoder.layers))
-    ]
-
     # Run the model forward pass on a group, on the hook functions not in the
     # group, and on all hook functions.
     model.create_hook_group(
-        "new_group", "self_attn", (None, None, None),
+        "new_group",
+        "self_attn",
+        (None, None, None),
     )
 
     _ = model(inputs)

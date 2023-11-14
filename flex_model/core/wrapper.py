@@ -1,40 +1,26 @@
 import functools
 import logging
-import time
 import weakref
 from argparse import Namespace
 from collections import defaultdict
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
-    Collection,
     Dict,
-    Generator,
-    Iterator,
     List,
     Optional,
-    Sequence,
     Set,
     Tuple,
     Union,
 )
 
 import torch
-import torch.multiprocessing as mp
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 import flex_model.distributed as dist
-from flex_model.traverse import (
-    InternalObject,
-    LeafObject,
-    ScalarObject,
-    flatten,
-    unflatten,
-)
 
 from .hook_function import HookFunction
 
@@ -117,7 +103,7 @@ class _HookFunctionGroupManager:
     ) -> None:
         """Add group tag to a collection of hook functions."""
         are_hook_fns = map(lambda x: isinstance(x, HookFunction), group_constructor)
-        assert all(are_hook_fns), f"set_group takes a collection of only HookFunctions"
+        assert all(are_hook_fns), "set_group takes a collection of only HookFunctions"
 
         # Associate the hook functions with this group.
         for hook_fn in group_constructor:
@@ -168,7 +154,7 @@ class _HookFunctionGroupManager:
         are_hook_fns = map(lambda x: isinstance(x, HookFunction), group_constructor)
         assert all(
             are_hook_fns
-        ), f"remove (list) takes a collection of only HookFunctions"
+        ), "remove (list) takes a collection of only HookFunctions"
         assert group_name != "all", "Can't remove 'all' group references"
 
         for hook_fn in group_constructor:
@@ -225,8 +211,9 @@ class _HookFunctionGroupManager:
 
 def _finalize_dangling_state(
     hook_functions: Dict[
-        Union[nn.Module, Tensor], Dict[HookFunction, torch.utils.hooks.RemovableHandle],
-    ]
+        Union[nn.Module, Tensor],
+        Dict[HookFunction, torch.utils.hooks.RemovableHandle],
+    ],
 ) -> None:
     """Clear persistent state when FlexModel is garbage collected."""
     # Remove hook functions from model.
@@ -359,7 +346,10 @@ class FlexModel(nn.Module):
         if torch.distributed.is_initialized():
             world_size = self.tp_size * self.pp_size * self.dp_size
             dist.initialize_distributed_backend(
-                world_size, self.tp_size, self.pp_size, self.dp_size,
+                world_size,
+                self.tp_size,
+                self.pp_size,
+                self.dp_size,
             )
             dist.initialize_activation_parallel()
 
@@ -369,7 +359,10 @@ class FlexModel(nn.Module):
 
         # Create shared state between FM instance and HF instances.
         self._shared_state = _SharedState(
-            self.output_ptr, self.save_ctx, self.trainable_modules, self.offload_mode,
+            self.output_ptr,
+            self.save_ctx,
+            self.trainable_modules,
+            self.offload_mode,
         )
         self._hook_fn_group_manager = _HookFunctionGroupManager()
 
@@ -389,7 +382,9 @@ class FlexModel(nn.Module):
 
         # Setup finalizer for cleanup.
         self._finalizer = weakref.finalize(
-            self, _finalize_dangling_state, self._module_to_hook_fns_map,
+            self,
+            _finalize_dangling_state,
+            self._module_to_hook_fns_map,
         )
 
     def _enable_hooks(self, active_hooks: Set[HookFunction]) -> None:
@@ -640,7 +635,9 @@ class FlexModel(nn.Module):
         self.trainable_modules[name] = module
 
     def get_module_parameter(
-        self, parameter_name: str, expected_shape: Tuple[int, ...],
+        self,
+        parameter_name: str,
+        expected_shape: Tuple[int, ...],
     ) -> Tensor:
         """Retrieves unsharded parameter from wrapped module.
 
@@ -669,7 +666,8 @@ class FlexModel(nn.Module):
 
         local_param = self.module.get_parameter(parameter_name).detach()
         collect_fn = dist.parse_collect_from_parameter_tensor(
-            local_param, expected_shape,
+            local_param,
+            expected_shape,
         )
         full_param = collect_fn(local_param).cpu()
         return full_param

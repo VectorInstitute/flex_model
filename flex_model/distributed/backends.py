@@ -5,7 +5,6 @@ from typing import List, Optional
 
 import torch
 import torch.distributed as pt_dist
-from accelerate import PartialState
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +70,10 @@ class GPUDeviceMesh:
         if world_size == 1:
             return cls([[0]], [[0]], [[0]])
 
-        num_tp_groups = world_size // tensor_parallel_size
-        num_pp_groups = 1
-        num_dp_groups = pipeline_parallel_size
-
         mesh = torch.arange(world_size).reshape(
-            pipeline_parallel_size, data_parallel_size, tensor_parallel_size,
+            pipeline_parallel_size,
+            data_parallel_size,
+            tensor_parallel_size,
         )
 
         # Build tensor parallel groups
@@ -401,8 +398,7 @@ class TorchDistributedBackend(DistributedBackend):
         return pt_dist.get_rank(group=self.dp_group)
 
     def destroy_activation_parallel(self) -> None:
-        """Delete all handles to tensor, pipeline and data parallel groups.
-        """
+        """Delete all handles to tensor, pipeline and data parallel groups."""
         self.all_tp_groups = None
         self.all_pp_groups = None
         self.all_dp_groups = None
@@ -641,8 +637,7 @@ class AccelerateDistributedBackend(DistributedBackend):
         return pt_dist.get_rank(group=self.dp_group)
 
     def destroy_activation_parallel(self) -> None:
-        """Delete all handles to tensor, pipeline and data parallel groups.
-        """
+        """Delete all handles to tensor, pipeline and data parallel groups."""
         self.all_tp_groups = None
         self.all_pp_groups = None
         self.all_dp_groups = None

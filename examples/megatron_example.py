@@ -1,7 +1,8 @@
-"""Runs an Llama-2-13B on 2 GPUs, demonstrating usage of a basic `HookFunction`
-with `FlexModel`.
+"""Runs Llama-2-13B on 2 GPUs using Fairscale's implementation of Megatron-LM
+layers. This script demonstrates basic usage of `FlexModel` with a generic
+`HookFunction`.
 
-This script can be run using:
+Running:
 
 torchrun --nnodes 1 --nproc_per_node 2 megatron_example.py
 
@@ -68,7 +69,11 @@ def main(args):
     activation_dict: Dict[str, List[Tensor]] = {}
 
     # Wrap model in FlexModel (llama-2-13b requires tensor parallel size 2)
-    model = FlexModel(model, activation_dict, tensor_parallel_size=2,)
+    model = FlexModel(
+        model,
+        activation_dict,
+        tensor_parallel_size=2,
+    )
 
     # Create a hook function
     module_name = "layers.28.feed_forward.w3"

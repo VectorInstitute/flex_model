@@ -1,5 +1,5 @@
 import logging
-from functools import partial, reduce
+from functools import reduce
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -80,7 +80,8 @@ def _autofill_expected_shape(
 
 
 def parse_collect_from_parameter_tensor(
-    tensor: Tensor, expected_shape: Tuple[Optional[int], ...],
+    tensor: Tensor,
+    expected_shape: Tuple[Optional[int], ...],
 ) -> Callable:
     """Find the communication function which gathers the full parameter tensor.
 
@@ -142,7 +143,8 @@ def parse_collect_from_parameter_tensor(
 
 
 def parse_collect_and_distribute_from_tensor(
-    tensor: Tensor, expected_shape: Tuple[Optional[int], ...],
+    tensor: Tensor,
+    expected_shape: Tuple[Optional[int], ...],
 ) -> Tuple[Callable, Callable]:
     """Find the appropriate collect/disperse communication function.
 
@@ -186,42 +188,70 @@ def parse_collect_and_distribute_from_tensor(
     if tp_world_size == dp_world_size == 1:
         return dist.unity, dist.unity
 
-    # Activation possibly sharded over tp, no need to gather over dp
+    # Define helper functions for collection/dispersion.
+    def _gather_only_tp(t):
+        dist.all_gather_tensor_parallel(t, dim=sharded_dim)
+        return t
+
+    def _scatter_only_tp(t):
+        dist.scatter_tensor_parallel(t, dim=sharded_dim)
+        return t
+
+    def _gather_only_dp(t):
+        dist.all_gather_data_parallel(t, dim=0)
+        return t
+
+    def _scatter_only_dp(t):
+        dist.scatter_data_parallel(t, dim=0)
+        return t
+
+    def _gather_tp_then_dp(t):
+        dist.all_gather_data_parallel(
+            dist.all_gather_tensor_parallel(t, dim=sharded_dim),
+            dim=0,
+        )
+        return t
+
+    def _scatter_dp_then_tp(t):
+        dist.scatter_tensor_parallel(
+            dist.scatter_data_parallel(t, dim=0),
+            dim=sharded_dim,
+        )
+        return t
+
+    # Pure TP: Activation maybe sharded over TP, no-op DP.
     if tp_world_size > 1 and dp_world_size == 1:
         sharded_dim = _get_different_dim(tensor.shape, expected_shape)
 
-        # Not sharded over tp
+        # Not sharded over TP.
         if sharded_dim == -1:
             collect_fn = dist.unity
             disperse_fn = dist.unity
 
-        # Sharded over tp
+        # Sharded over TP.
         else:
-            collect_fn = lambda t: dist.all_gather_tensor_parallel(t, dim=sharded_dim)
-            disperse_fn = lambda t: dist.scatter_tensor_parallel(t, dim=sharded_dim)
+            collect_fn = _gather_only_tp
+            disperse_fn = _scatter_only_tp
 
-    # Only data parallelism, always gather
+    # Pure DP: Always gather across DP.
     elif tp_world_size == 1 and dp_world_size > 1:
-        collect_fn = lambda t: dist.all_gather_data_parallel(t, dim=0)
-        disperse_fn = lambda t: dist.scatter_data_parallel(t, dim=0)
+        collect_fn = _gather_only_dp
+        disperse_fn = _scatter_only_dp
 
-    # Activation possibly sharded over tp, always gather over dp
+    # Both TP and DP: Activation maybe sharded over tp, always gather across
+    # DP.
     elif tp_world_size > 1 and dp_world_size > 1:
         sharded_dim = _get_different_dim(tensor.shape, expected_shape)
 
         # Not sharded over tp
         if sharded_dim == -1:
-            collect_fn = lambda t: dist.all_gather_data_parallel(t, dim=0)
-            disperse_fn = lambda t: dist.scatter_data_parallel(t, dim=0)
+            collect_fn = _gather_only_dp
+            disperse_fn = _scatter_only_dp
 
         # Sharded over tp
         else:
-            collect_fn = lambda t: dist.all_gather_data_parallel(
-                dist.all_gather_tensor_parallel(t, dim=sharded_dim), dim=0,
-            )
-            disperse_fn = lambda t: dist.scatter_tensor_parallel(
-                dist.scatter_data_parallel(t, dim=0), dim=sharded_dim,
-            )
+            collect_fn = _gather_tp_then_dp
+            disperse_fn = _scatter_dp_then_tp
 
     else:
         raise Exception("Invalid world sizes: tp{tp_world_size}, dp{dp_world_size}")

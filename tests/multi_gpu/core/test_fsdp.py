@@ -1,14 +1,11 @@
 import logging
 
-import pytest
 import torch
 from accelerate import Accelerator
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import flex_model.distributed as dist
 import tests.multi_gpu.testing_utils as utils
 from flex_model.core import FlexModel, HookFunction
-from flex_model.utils import setup_logger
 from tests.multi_gpu.registry import register_multigpu_test
 
 logger = logging.getLogger(__name__)
@@ -116,16 +113,20 @@ def test_huggingface_llama():
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt",)[
-        "input_ids"
-    ].to(accelerator.device)
+    inputs = tokenizer(
+        prompts,
+        padding="max_length",
+        return_tensors="pt",
+    )["input_ids"].to(accelerator.device)
 
     # Multi-gpu FSDP
     multi_gpu_activations = {}
     model = accelerator.prepare(model)
 
     flex_model = FlexModel(
-        model, multi_gpu_activations, data_parallel_size=accelerator.num_processes,
+        model,
+        multi_gpu_activations,
+        data_parallel_size=accelerator.num_processes,
     )
     for module_name, expected_shape in LLAMA_MODULES_FSDP.items():
         flex_model.register_forward_hook(HookFunction(module_name, expected_shape))
@@ -165,7 +166,8 @@ def test_huggingface_llama():
     # Make sure activations are equal
     for k in single_gpu_activations.keys():
         assert torch.allclose(
-            all_single_gpu_activations[k][0], multi_gpu_activations_[k][0],
+            all_single_gpu_activations[k][0],
+            multi_gpu_activations_[k][0],
         ), (
             f"Failed: {k}, max diff: "
             f"{(all_single_gpu_activations[k] - multi_gpu_activations_[k]).abs().max()}"

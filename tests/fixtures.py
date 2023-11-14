@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import pytest
 import torch
 import torch.nn as nn
@@ -22,7 +20,8 @@ def llama_13b() -> nn.Module:
 @pytest.fixture
 def llama_tokenizer() -> LlamaTokenizer:
     tokenizer = AutoTokenizer.from_pretrained(
-        "/model-weights/Llama-2-13b-hf", local_files_only=True,
+        "/model-weights/Llama-2-13b-hf",
+        local_files_only=True,
     )
     tokenizer.pad_token_id = 0
     tokenizer.padding_side = "right"
@@ -34,7 +33,9 @@ def llama_tokenizer() -> LlamaTokenizer:
 @pytest.fixture
 def opt_350m() -> nn.Module:
     model = AutoModelForCausalLM.from_pretrained(
-        "/model-weights/opt-350m", local_files_only=True, torch_dtype=torch.bfloat16,
+        "/model-weights/opt-350m",
+        local_files_only=True,
+        torch_dtype=torch.bfloat16,
     )
 
     return model
@@ -43,7 +44,9 @@ def opt_350m() -> nn.Module:
 @pytest.fixture(scope="session")
 def opt_350m_module_names():
     model = AutoModelForCausalLM.from_pretrained(
-        "/model-weights/opt-350m", local_files_only=True, torch_dtype=torch.bfloat16,
+        "/model-weights/opt-350m",
+        local_files_only=True,
+        torch_dtype=torch.bfloat16,
     )
     return [n for n, _ in model.named_modules()]
 
@@ -51,7 +54,8 @@ def opt_350m_module_names():
 @pytest.fixture
 def opt_tokenizer():
     tokenizer = AutoTokenizer.from_pretrained(
-        "/model-weights/opt-350m", local_files_only=True,
+        "/model-weights/opt-350m",
+        local_files_only=True,
     )
 
     return tokenizer

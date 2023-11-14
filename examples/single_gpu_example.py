@@ -1,3 +1,11 @@
+"""Runs Llama-2-13B on a single GPU using Huggingface Transformers. This script
+demonstrates basic usage of the `FlexModel` wrapper with a generic
+`HookFunction`.
+
+Running:
+
+python single_gpu_example.py
+"""
 import argparse
 from typing import Dict, List
 
@@ -34,7 +42,8 @@ def main(args):
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer_dir, local_files_only=True,
+        args.tokenizer_dir,
+        local_files_only=True,
     )
 
     ## NEW ##

@@ -27,7 +27,8 @@ class SlurmJobResourceSpec:
 
 
 def make_test_registry(
-    registry_name, resource_spec: SlurmJobResourceSpec = None,
+    registry_name,
+    resource_spec: SlurmJobResourceSpec = None,
 ):
     global _MULTIGPU_TESTS_REGISTRY
     global _MULTIGPU_RESOURCE_SPECS

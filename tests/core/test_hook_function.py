@@ -5,10 +5,9 @@ from typing import Dict
 import pytest
 import torch
 import torch.nn as nn
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from flex_model.core import FlexModel, HookFunction
-from tests.fixtures import opt_350m, opt_tokenizer
+from tests.fixtures import opt_350m
 
 # could be any MLP layer and the code won't break. The test doesn't generalize
 # to other kinds of layers
@@ -81,7 +80,11 @@ def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer, offload_mode):
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(prompts, padding=True, return_tensors="pt",)["input_ids"].cuda()
+    inputs = tokenizer(
+        prompts,
+        padding=True,
+        return_tensors="pt",
+    )["input_ids"].cuda()
 
     # first get our ground truth activations
     inject_layer = LayerInjection(MODULE_NAME, model).to(model.dtype).cuda()

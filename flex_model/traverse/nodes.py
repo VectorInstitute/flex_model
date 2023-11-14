@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import torch
 from torch import Tensor
 from transformers.modeling_outputs import BaseModelOutputWithPast
 
@@ -238,7 +237,7 @@ class LeafNode:
         raise NotImplementedError
 
     def __repr__(self) -> str:
-        return f"LeafNode"
+        return "LeafNode"
 
     def __str__(self) -> str:
         return self.__repr__()
@@ -246,8 +245,7 @@ class LeafNode:
 
 @register_leaf_node_type(Tensor)
 class TensorNode(LeafNode):
-    """Leaf node corresponding to a Pytorch tensor.
-    """
+    """Leaf node corresponding to a Pytorch tensor."""
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, TensorNode):

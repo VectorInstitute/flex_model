@@ -1,9 +1,7 @@
 import argparse
-import contextlib
 import functools
 import os
 import random
-import time
 from collections import defaultdict
 from itertools import chain
 from typing import Callable, List
@@ -12,7 +10,6 @@ import megatron.core.parallel_state as mpu
 import numpy as np
 import torch
 import torch.nn as nn
-import wandb
 from megatron.core.parallel_state import (
     initialize_model_parallel as initialize_megatron_model_parallel,
 )
@@ -21,7 +18,6 @@ from megatron.core.tensor_parallel import (
     RowParallelLinear,
     model_parallel_cuda_manual_seed,
 )
-from torch.profiler import profile
 
 from flex_model.core import FlexModel, HookFunction
 
@@ -118,12 +114,10 @@ def hook_function_gpu(self, inputs, outputs, acc, name):
 
 
 def hook_function_cpu_gather_scatter(self, inputs, outputs, acc, name):
-    """Hardcoded minimal hook function with gather/scatter.
-    """
+    """Hardcoded minimal hook function with gather/scatter."""
     rank = mpu.get_tensor_model_parallel_rank()
 
     _outputs = outputs[0] if isinstance(outputs, tuple) else outputs
-    original_shape = _outputs.shape
 
     def all_gather(tensor, dim=-1):
         output_list = [
@@ -131,7 +125,9 @@ def hook_function_cpu_gather_scatter(self, inputs, outputs, acc, name):
             for _ in range(mpu.get_tensor_model_parallel_world_size())
         ]
         torch.distributed.all_gather(
-            output_list, tensor, group=mpu.get_tensor_model_parallel_group(),
+            output_list,
+            tensor,
+            group=mpu.get_tensor_model_parallel_group(),
         )
         return torch.cat(output_list, dim=dim)
 
@@ -142,17 +138,20 @@ def hook_function_cpu_gather_scatter(self, inputs, outputs, acc, name):
         return scatter_list[rank]
 
     # Determine correct gather/scatter functions.
+    def _no_op(x):
+        return x
+
     if isinstance(self, ColumnParallelLinear):
         gather_fn = all_gather
         scatter_fn = scatter
 
     elif isinstance(self, RowParallelLinear):
-        gather_fn = lambda x: x
-        scatter_fn = lambda x: x
+        gather_fn = _no_op
+        scatter_fn = _no_op
 
     elif isinstance(self, nn.Linear):
-        gather_fn = lambda x: x
-        scatter_fn = lambda x: x
+        gather_fn = _no_op
+        scatter_fn = _no_op
 
     else:
         raise NotImplementedError
@@ -192,7 +191,10 @@ class ExperimentNetworkManager:
 
     def get_experiment_handles(self, prefix: str) -> List[Callable]:
         experiments = list(
-            filter(lambda name: name.startswith(prefix), self.named_experiments,)
+            filter(
+                lambda name: name.startswith(prefix),
+                self.named_experiments,
+            )
         )
         experiment_handles = [getattr(self, e) for e in experiments]
         return experiment_handles
@@ -342,7 +344,10 @@ class ExperimentNetworkManager:
         )
         for n in module_names_to_hook:
             network.register_forward_hook(
-                HookFunction(module_name=n, expected_shape=(None, model_dim),)
+                HookFunction(
+                    module_name=n,
+                    expected_shape=(None, model_dim),
+                )
             )
         return network
 
