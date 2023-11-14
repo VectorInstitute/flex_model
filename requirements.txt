@@ -1,3 +1,4 @@
+-i https://download.pytorch.org/whl/cu118
 accelerate
 black
 fairscale
@@ -5,5 +6,4 @@ pre-commit
 sentencepiece
 sphinx-rtd-theme
 tokenizers
-torch
 transformers

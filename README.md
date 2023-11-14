@@ -1,10 +1,14 @@
 # Installation
-Run `pip install -e .` from the root directory.
+Run `pip install -e .` from the root directory. PyPi package coming soon!
 
 # Important Notes
 - Make sure to replace any instances of `module.forward(inputs)` with
 `module(inputs)`. The forward hooks are not run by PyTorch if you directly call
 the forward function of a module (this is the case with LLaMA).
+- If you would like to create `HookFunction` entrypoints arbitrarily in the
+wrapped model, you can place `DummyModule`s with identity forward functions
+which can be hooked into. `DummyModule` is located in the `core/core_utils.py`
+file.
 
 # Usage
 Here's a short example on how you would use the FlexModel and HookFunction

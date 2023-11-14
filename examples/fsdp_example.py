@@ -1,10 +1,18 @@
 import argparse
-from typing import Dict
+import functools
+import os
+from typing import Dict, List
 
 import torch
-from accelerate import Accelerator
+import torch.distributed as dist
+import torch.nn as nn
 from torch import Tensor
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from torch.distributed.fsdp import BackwardPrefetch, CPUOffload
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from transformers import LlamaForCausalLM, LlamaTokenizerFast
+from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
 from flex_model.core import FlexModel, HookFunction
 
@@ -12,13 +20,83 @@ from flex_model.core import FlexModel, HookFunction
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+        "--checkpoint_dir", type=str, default="/model-weights/Llama-2-13b-hf"
     )
     parser.add_argument(
-        "--tokenizer_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+        "--tokenizer_dir", type=str, default="/model-weights/Llama-2-13b-hf"
     )
     args = parser.parse_args()
     return args
+
+
+def get_llama2_tokenizer(tokenizer_dir):
+    tokenizer = LlamaTokenizerFast.from_pretrained(
+        tokenizer_dir, local_files_only=True,
+    )
+    tokenizer.model_max_length = 512
+
+    # Llama-2 has no PAD token, substitute the EOS token.
+    tokenizer.pad_token = tokenizer.eos_token
+
+    return tokenizer
+
+
+def wrap_llama2_fsdp(base_model):
+    # Initialize fsdp options.
+    backward_prefetch = BackwardPrefetch.BACKWARD_PRE
+
+    # Shard model parameters, optimizer, grads over all GPUs.
+    sharding_strategy = ShardingStrategy.FULL_SHARD
+
+    mixed_precision = MixedPrecision(
+        param_dtype=torch.bfloat16,
+        reduce_dtype=torch.bfloat16,
+        buffer_dtype=torch.bfloat16,
+        cast_root_forward_inputs=True,
+    )
+
+    # Don't offload to CPU.
+    cpu_offload = CPUOffload(offload_params=False)
+
+    def _param_init_fn(module: nn.Module):
+        module = module.to_empty(device=torch.cuda.current_device())  # , recurse=False)
+        return module
+
+    # Memory-efficient init., materialize full model params once on CPU RAM.
+    if dist.get_rank() == 0:
+        param_init_fn = None
+    else:
+        param_init_fn = _param_init_fn
+
+    transformer_auto_wrapper_policy = functools.partial(
+        transformer_auto_wrap_policy, transformer_layer_cls={LlamaDecoderLayer},
+    )
+
+    # Wrap model.
+    model = FSDP(
+        base_model,
+        process_group=None,  # default pg.
+        sharding_strategy=sharding_strategy,
+        cpu_offload=cpu_offload,
+        auto_wrap_policy=transformer_auto_wrapper_policy,
+        backward_prefetch=backward_prefetch,
+        mixed_precision=mixed_precision,
+        ignored_modules=None,
+        param_init_fn=param_init_fn,
+        device_id=torch.cuda.current_device(),
+        sync_module_states=True,
+        forward_prefetch=True,
+        limit_all_gathers=True,
+        use_orig_params=False,
+    )
+
+    return model
+
+
+def init_dist():
+    dist.init_process_group("nccl")
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    torch.cuda.set_device(local_rank)
 
 
 def main(args):
@@ -27,37 +105,35 @@ def main(args):
     This script must be run via Huggingface Accelerate FSDP. Retrieves
     activations over all DP-workers by gathering them in the batch dimension.
     """
+    init_dist()
+
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+
     prompts = [
         "It's a nice day we're having",
         "The capital of Canada is",
         "What should I eat for dinner tonight?",
         "There's about three people going to",
     ]
+
     # Load llama-2-13b-hf model and prepare it for FSDP
-    accelerator = Accelerator()
-    model = AutoModelForCausalLM.from_pretrained(
+    model = LlamaForCausalLM.from_pretrained(
         args.checkpoint_dir,
         local_files_only=True,
         low_cpu_mem_usage=True,
         torch_dtype=torch.bfloat16,
     )
-    model = accelerator.prepare(model)
+    model = wrap_llama2_fsdp(model)
 
     # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer_dir, local_files_only=True,
-    )
-    tokenizer.pad_token_id = 0
-    tokenizer.padding_side = "right"
-    tokenizer.model_max_length = 128
+    tokenizer = get_llama2_tokenizer(args.tokenizer_dir)
 
     # Define output to dump activations to
-    activation_dict: Dist[str, Tensor] = {}
+    activation_dict: Dict[str, List[Tensor]] = {}
 
     # Wrap model in FlexModel
-    model = FlexModel(
-        model, activation_dict, data_parallel_size=accelerator.num_processes,
-    )
+    model = FlexModel(model, activation_dict, data_parallel_size=world_size,)
 
     # Create a hook function
     module_name = "_fsdp_wrapped_module.model.layers.30._fsdp_wrapped_module.mlp"
@@ -68,23 +144,21 @@ def main(args):
     )
 
     # Register hook function with the model
-    model.register_hook_function(hook_function)
+    model.register_forward_hook(hook_function)
 
     # Tokenize a prompt
-    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt",)["input_ids"]
+    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt")["input_ids"]
 
     # Split the batch across dp workers
-    dp_worker_inputs = inputs.chunk(accelerator.num_processes, dim=0,)[
-        accelerator.process_index
-    ].to(accelerator.device)
+    dp_worker_inputs = inputs.chunk(world_size, dim=0)[rank].cuda()
 
     # Run through model to generate logits and activations
-    logits = model(dp_worker_inputs)
+    _outputs = model(dp_worker_inputs)
 
     # Activations are only dumped to main process
-    if accelerator.is_main_process:
-        print(f"Activation shape: {activation_dict[module_name].shape}")
-        print(activation_dict[module_name])
+    if rank == 0:
+        print(f"Activation shape: {activation_dict[module_name][0].shape}")
+        print(activation_dict[module_name][0])
 
 
 if __name__ == "__main__":

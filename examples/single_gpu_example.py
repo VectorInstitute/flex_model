@@ -1,7 +1,6 @@
 import argparse
-from typing import Dict
+from typing import Dict, List
 
-import torch
 from torch import Tensor
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -11,10 +10,10 @@ from flex_model.core import FlexModel, HookFunction
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--checkpoint_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+        "--checkpoint_dir", type=str, default="/model-weights/Llama-2-13b-hf"
     )
     parser.add_argument(
-        "--tokenizer_dir", type=str, default="/ssd005/projects/llm/llama-2-13b-hf"
+        "--tokenizer_dir", type=str, default="/model-weights/Llama-2-13b-hf"
     )
     args = parser.parse_args()
     return args
@@ -40,7 +39,7 @@ def main(args):
 
     ## NEW ##
     # Define output to dump activations to
-    activation_dict: Dist[str, Tensor] = {}
+    activation_dict: Dict[str, List[Tensor]] = {}
 
     # Wrap model in FlexModel
     model = FlexModel(model, activation_dict)
@@ -53,7 +52,7 @@ def main(args):
     )
 
     # Register hook function with the model
-    model.register_hook_function(hook_function)
+    model.register_forward_hook(hook_function)
     ## NEW ##
 
     # Tokenize a prompt
@@ -62,7 +61,7 @@ def main(args):
     ]
 
     # Run through model to generate logits and activations
-    logits = model(inputs)
+    _outputs = model(inputs)
 
     print(activation_dict)
 

@@ -533,6 +533,7 @@ class FlexModel(nn.Module):
         self._hook_fn_group_manager.update(group_constructor, group_name)
 
     def remove_hook_groups(
+        self,
         group_constructor: Union[List[HookFunction], HookFunction, str],
         group_name: str,
     ) -> None:
