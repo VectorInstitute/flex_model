@@ -52,11 +52,11 @@ def get_llama2_tokenizer(tokenizer_dir):
     return tokenizer
 
 
-def wrap_llama2_fsdp(args):
+def make_llama2_fsdp(checkpoint_dir):
     # Load llama-2 model and prepare it for FSDP (CPU RAM-efficient)
     if dist.get_rank() == 0:
         base_model = LlamaForCausalLM.from_pretrained(
-            args.checkpoint_dir,
+            checkpoint_dir,
             local_files_only=True,
             torch_dtype=torch.bfloat16,
         )
@@ -64,7 +64,7 @@ def wrap_llama2_fsdp(args):
     else:
         with torch.device("meta"):
             base_model = LlamaForCausalLM.from_pretrained(
-                args.checkpoint_dir,
+                checkpoint_dir,
                 local_files_only=True,
                 torch_dtype=torch.bfloat16,
             )
@@ -145,7 +145,7 @@ def main(args):
         "There's about three people going to",
     ]
 
-    model = wrap_llama2_fsdp(args)
+    model = make_llama2_fsdp(args.checkpoint_dir)
 
     # Load tokenizer
     tokenizer = get_llama2_tokenizer(args.tokenizer_dir)
@@ -179,7 +179,7 @@ def main(args):
     ]
 
     # Split the batch across dp workers
-    dp_worker_inputs = inputs.chunk(world_size, dim=0)[rank].cuda()
+    dp_worker_inputs = inputs.chunk(world_size, dim=0)[rank]
 
     # Run through model to generate logits and activations
     _outputs = model(dp_worker_inputs)

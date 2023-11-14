@@ -1,4 +1,6 @@
+# Default torch ships with CUDA-12, we need CUDA-11.8.
 -i https://download.pytorch.org/whl/cu118
+
 accelerate
 black
 fairscale

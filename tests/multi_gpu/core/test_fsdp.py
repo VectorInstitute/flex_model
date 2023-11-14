@@ -206,7 +206,7 @@ def test_fsdp_llama():
         prompts,
         padding="max_length",
         return_tensors="pt",
-    )["input_ids"].cuda()
+    )["input_ids"]
 
     # Multi-gpu FSDP
     multi_gpu_activations = {}

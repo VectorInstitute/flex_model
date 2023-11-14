@@ -18,10 +18,10 @@ from flex_model.core import FlexModel, HookFunction
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--checkpoint_dir", type=str, default="/model-weights/Llama-2-13b-hf"
+        "--checkpoint_dir", type=str, default="/model-weights/Llama-2-7b-hf"
     )
     parser.add_argument(
-        "--tokenizer_dir", type=str, default="/model-weights/Llama-2-13b-hf"
+        "--tokenizer_dir", type=str, default="/model-weights/Llama-2-7b-hf"
     )
     args = parser.parse_args()
     return args
@@ -55,7 +55,7 @@ def main(args):
 
     # Create a hook function
     hook_function = HookFunction(
-        module_name="model.layers.30",
+        module_name="model.layers.24",
         expected_shape=(None, None, None),  # Not sharded, can pass None per dim
         editing_function=None,  # Just doing retrieval
     )
