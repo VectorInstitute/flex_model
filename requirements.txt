@@ -7,3 +7,4 @@ sphinx-rtd-theme
 tokenizers
 torch
 transformers
+matplotlib
