@@ -88,7 +88,9 @@ class Utils:
     ):
         if not dist.is_initialized():
             Utils.initialize_distributed()
-        fm_dist.initialize_distributed_backend(dist.get_world_size(), tp, pp, dp)
+        fm_dist.initialize_distributed_backend(
+            dist.get_world_size(), tp, pp, dp
+        )
 
     @staticmethod
     def destroy_distributed_backend():
@@ -112,7 +114,8 @@ def gather_weight(param: Tensor, dim: int):
         return param
 
     tensor_list = [
-        torch.empty_like(param) for _ in range(mpu.get_model_parallel_world_size())
+        torch.empty_like(param)
+        for _ in range(mpu.get_model_parallel_world_size())
     ]
     tensor_list[mpu.get_model_parallel_rank()] = param
 
@@ -172,7 +175,9 @@ class FairscaleLayers(nn.Module):
         full_col_linear_weight = gather_weight(
             self.column_parallel_linear.weight.detach(), dim=0
         )
-        self.col_linear = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
+        self.col_linear = nn.Linear(
+            self.hidden_dim, self.hidden_dim, bias=False
+        )
         self.col_linear.weight = nn.Parameter(full_col_linear_weight)
 
         # Row parallel linear and regular linear
@@ -185,7 +190,9 @@ class FairscaleLayers(nn.Module):
         full_row_linear_weight = gather_weight(
             self.row_parallel_linear.weight.detach(), dim=1
         )
-        self.row_linear = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
+        self.row_linear = nn.Linear(
+            self.hidden_dim, self.hidden_dim, bias=False
+        )
         self.row_linear.weight = nn.Parameter(full_row_linear_weight)
 
     def parallel_forward(self, inputs):

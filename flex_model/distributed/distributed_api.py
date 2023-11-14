@@ -69,7 +69,8 @@ def initialize_distributed_backend(
         and dp sizes.
     """
     assert (
-        world_size == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
+        world_size
+        == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
     )
     backend_cls = _parse_backend()
     logger.debug(f"Using DistributedBackend: {backend_cls.__name__}")
@@ -142,7 +143,9 @@ def _parse_backend() -> Type[DistributedBackend]:
 
     # Unsupported
     else:
-        raise NotImplementedError("Distributed backend currently not supported.")
+        raise NotImplementedError(
+            "Distributed backend currently not supported."
+        )
 
 
 def _expose_distributed_backend(backend: DistributedBackend):

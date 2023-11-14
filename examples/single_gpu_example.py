@@ -65,9 +65,9 @@ def main(args):
     ## NEW ##
 
     # Tokenize a prompt
-    inputs = tokenizer("Where is the best spot for lunch?", return_tensors="pt")[
-        "input_ids"
-    ]
+    inputs = tokenizer(
+        "Where is the best spot for lunch?", return_tensors="pt"
+    )["input_ids"]
 
     # Run through model to generate logits and activations
     _outputs = model(inputs)

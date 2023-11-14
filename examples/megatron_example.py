@@ -60,9 +60,13 @@ def main(args):
         bsz = len(input_tokens)
         total_len = max(len(t) for t in input_tokens)
         pad_id = 0
-        tokens = torch.full((bsz, total_len), pad_id, dtype=torch.long, device="cuda")
+        tokens = torch.full(
+            (bsz, total_len), pad_id, dtype=torch.long, device="cuda"
+        )
         for k, t in enumerate(input_tokens):
-            tokens[k, : len(t)] = torch.tensor(t, dtype=torch.long, device="cuda")
+            tokens[k, : len(t)] = torch.tensor(
+                t, dtype=torch.long, device="cuda"
+            )
         return tokens
 
     # Define output to dump activations to

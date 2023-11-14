@@ -130,15 +130,21 @@ class DistributedBackend(ABC):
         ...
 
     @abstractmethod
-    def get_activation_tensor_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_tensor_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         ...
 
     @abstractmethod
-    def get_activation_data_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_data_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         ...
 
     @abstractmethod
-    def get_activation_pipeline_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_pipeline_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         ...
 
     @abstractmethod
@@ -260,7 +266,11 @@ class TorchDistributedBackend(DistributedBackend):
             initialized.
         :rtype: bool
         """
-        if self.tp_group is None and self.dp_group is None and self.pp_group is None:
+        if (
+            self.tp_group is None
+            and self.dp_group is None
+            and self.pp_group is None
+        ):
             return False
         return True
 
@@ -288,7 +298,9 @@ class TorchDistributedBackend(DistributedBackend):
         """
         return self.dp_group is not None
 
-    def get_activation_tensor_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_tensor_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the tensor parallel group handle the local device belongs to.
 
         :returns: The tensor parallel distributed group.
@@ -300,7 +312,9 @@ class TorchDistributedBackend(DistributedBackend):
         assert self.activation_parallel_is_initialized()
         return self.tp_group
 
-    def get_activation_pipeline_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_pipeline_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the pipeline parallel group handle the local device belongs to.
 
         :returns: The pipeline parallel distributed group.
@@ -312,7 +326,9 @@ class TorchDistributedBackend(DistributedBackend):
         assert self.activation_parallel_is_initialized()
         return self.pp_group
 
-    def get_activation_data_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_data_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the data parallel group handle the local device belongs to.
 
         :returns: The data parallel distributed group.
@@ -499,7 +515,11 @@ class AccelerateDistributedBackend(DistributedBackend):
             initialized.
         :rtype: bool
         """
-        if self.tp_group is None and self.dp_group is None and self.pp_group is None:
+        if (
+            self.tp_group is None
+            and self.dp_group is None
+            and self.pp_group is None
+        ):
             return False
         return True
 
@@ -527,7 +547,9 @@ class AccelerateDistributedBackend(DistributedBackend):
         """
         return self.dp_group is not None
 
-    def get_activation_tensor_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_tensor_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the tensor parallel group handle the local device belongs to.
 
         :returns: The tensor parallel distributed group.
@@ -539,7 +561,9 @@ class AccelerateDistributedBackend(DistributedBackend):
         assert self.activation_parallel_is_initialized()
         return self.tp_group
 
-    def get_activation_pipeline_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_pipeline_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the pipeline parallel group handle the local device belongs to.
 
         :returns: The pipeline parallel distributed group.
@@ -551,7 +575,9 @@ class AccelerateDistributedBackend(DistributedBackend):
         assert self.activation_parallel_is_initialized()
         return self.pp_group
 
-    def get_activation_data_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_data_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the data parallel group handle the local device belongs to.
 
         :returns: The data parallel distributed group.

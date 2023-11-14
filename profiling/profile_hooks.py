@@ -141,7 +141,9 @@ def main(args):
         os.makedirs(f"{args.profile_dir}/{exp.__name__}", exist_ok=True)
 
     num_steps = (
-        args.profile_wait_steps * args.profile_warmup_steps * args.profile_active_steps
+        args.profile_wait_steps
+        * args.profile_warmup_steps
+        * args.profile_active_steps
     )
 
     # Profiler setup.
@@ -166,7 +168,10 @@ def main(args):
 
             for exp in experiments:
                 exp_name = exp.__name__
-                if args.profile_force_exp and exp_name != args.profile_force_exp:
+                if (
+                    args.profile_force_exp
+                    and exp_name != args.profile_force_exp
+                ):
                     continue
 
                 if args.profile_save_profile:

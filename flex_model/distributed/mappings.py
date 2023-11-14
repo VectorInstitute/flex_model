@@ -239,7 +239,9 @@ def _group_by_dtype(
     tensor_dict: Dict[str, Tensor]
 ) -> Dict[torch.dtype, Dict[str, Tensor]]:
     dtypes = [torch.float32, torch.float16, torch.bfloat16]
-    dtype_groups: Dict[torch.dtype, Dict[str, Tensor]] = {dtype: {} for dtype in dtypes}
+    dtype_groups: Dict[torch.dtype, Dict[str, Tensor]] = {
+        dtype: {} for dtype in dtypes
+    }
 
     for name, tensor in tensor_dict.items():
         assert tensor.dtype in dtype_groups, (
@@ -355,7 +357,8 @@ def _gather_pipeline_parallel(
             send_rank_groups[dtype].append(0)
 
             logger.debug(
-                f"Rank{rank}: Constructed send - " f"({tbuf.numel()}) [{rank}] -> [0]"
+                f"Rank{rank}: Constructed send - "
+                f"({tbuf.numel()}) [{rank}] -> [0]"
             )
 
     def _set_device(_buffer_list, device):
@@ -409,7 +412,9 @@ def _gather_pipeline_parallel(
 
             buf_rank = meta["buffer_rank"]
             buf_dtype = meta["buffer_dtype"]
-            assert buf_dtype == dtype, f"Dtype mismatch: {buf_dtype} and {dtype}"
+            assert (
+                buf_dtype == dtype
+            ), f"Dtype mismatch: {buf_dtype} and {dtype}"
             assert buf_rank == recv_r, f"Rank mismatch: {buf_rank} and {recv_r}"
 
             _reshard_tbuf(meta, recv_tbuf)
@@ -477,7 +482,9 @@ def batch_isend_irecv_pipeline_parallel(
     def _gen_debug_msg(t_list):
         return ", ".join([f"({t.numel()}, {t.dtype})" for t in t_list])
 
-    logger.debug(f"Rank{rank}: Received buffers - [{_gen_debug_msg(recv_tensors)}]")
+    logger.debug(
+        f"Rank{rank}: Received buffers - [{_gen_debug_msg(recv_tensors)}]"
+    )
     logger.debug(f"Rank{rank}: Sent buffers - [{_gen_debug_msg(send_tensors)}]")
 
     # TODO: Remove after verification that no race cond. occurs.
@@ -528,6 +535,8 @@ def gather_pipeline_parallel_tensor_dicts(
     )
 
     # Communicate.
-    output_tensor_dict = _gather_pipeline_parallel(tbuf_groups, all_metadata_groups)
+    output_tensor_dict = _gather_pipeline_parallel(
+        tbuf_groups, all_metadata_groups
+    )
 
     return output_tensor_dict

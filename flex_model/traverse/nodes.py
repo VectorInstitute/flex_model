@@ -60,7 +60,10 @@ class InternalNode:
     """
 
     def __init__(
-        self, children: Optional[List[Union[InternalNode, LeafNode, ScalarNode]]] = None
+        self,
+        children: Optional[
+            List[Union[InternalNode, LeafNode, ScalarNode]]
+        ] = None,
     ) -> None:
         self.children = children if children is not None else []
 
@@ -194,7 +197,9 @@ class BaseModelOutputWithPastNode(InternalNode):
     def __repr__(self) -> str:
         return f"BaseModelOutputWithPastNode({self.children})"
 
-    def flatten(self, instance: BaseModelOutputWithPast) -> Tuple[Any, Any, Any, Any]:
+    def flatten(
+        self, instance: BaseModelOutputWithPast
+    ) -> Tuple[Any, Any, Any, Any]:
         """Unpack the :code:`BaseModelOutputWithPast`.
 
         :param BaseModelOutputWithPast instance: :code:`BaseModelOutputWithPast` to

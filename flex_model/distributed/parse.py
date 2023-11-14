@@ -75,7 +75,9 @@ def _autofill_expected_shape(
     filled_shape = tuple(
         d1 if d2 is None else d2 for d1, d2 in zip(tensor_shape, expected_shape)
     )
-    logger.debug(f"Inferring shape: User-{expected_shape}, Inferred-" f"{filled_shape}")
+    logger.debug(
+        f"Inferring shape: User-{expected_shape}, Inferred-" f"{filled_shape}"
+    )
     return filled_shape
 
 
@@ -254,6 +256,8 @@ def parse_collect_and_distribute_from_tensor(
             disperse_fn = _scatter_dp_then_tp
 
     else:
-        raise Exception("Invalid world sizes: tp{tp_world_size}, dp{dp_world_size}")
+        raise Exception(
+            "Invalid world sizes: tp{tp_world_size}, dp{dp_world_size}"
+        )
 
     return collect_fn, disperse_fn

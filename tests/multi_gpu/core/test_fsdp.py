@@ -69,7 +69,11 @@ LLAMA_MODULES_FSDP = {
         None,
         5120,
     ),
-    "_fsdp_wrapped_module.model.layers.32._fsdp_wrapped_module.mlp": (None, None, 5120),
+    "_fsdp_wrapped_module.model.layers.32._fsdp_wrapped_module.mlp": (
+        None,
+        None,
+        5120,
+    ),
     "_fsdp_wrapped_module.model.layers.7._fsdp_wrapped_module.mlp.gate_proj_dummy": (
         None,
         None,
@@ -129,7 +133,9 @@ def test_huggingface_llama():
         data_parallel_size=accelerator.num_processes,
     )
     for module_name, expected_shape in LLAMA_MODULES_FSDP.items():
-        flex_model.register_forward_hook(HookFunction(module_name, expected_shape))
+        flex_model.register_forward_hook(
+            HookFunction(module_name, expected_shape)
+        )
 
     chunked_inputs = inputs.chunk(accelerator.num_processes, dim=0)
 
@@ -155,7 +161,9 @@ def test_huggingface_llama():
     flex_model = FlexModel(model, single_gpu_activations)
 
     for module_name, expected_shape in LLAMA_MODULES.items():
-        flex_model.register_forward_hook(HookFunction(module_name, expected_shape))
+        flex_model.register_forward_hook(
+            HookFunction(module_name, expected_shape)
+        )
 
     for chunk in chunked_inputs:
         _ = flex_model(chunked_inputs[0])

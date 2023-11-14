@@ -65,7 +65,10 @@ def test_all_gather_tensor_parallel():
     )
     result = fm_dist.all_gather_tensor_parallel(tensor_to_gather)
     assert torch.equal(
-        result, torch.arange(fm_dist.get_activation_tensor_parallel_world_size()).cuda()
+        result,
+        torch.arange(
+            fm_dist.get_activation_tensor_parallel_world_size()
+        ).cuda(),
     )
 
     Utils.destroy_activation_parallel()
@@ -84,7 +87,8 @@ def test_all_gather_data_parallel():
     )
     result = fm_dist.all_gather_data_parallel(tensor_to_gather)
     assert torch.equal(
-        result, torch.arange(fm_dist.get_activation_data_parallel_world_size()).cuda()
+        result,
+        torch.arange(fm_dist.get_activation_data_parallel_world_size()).cuda(),
     )
 
     Utils.destroy_activation_parallel()
@@ -103,7 +107,8 @@ def test_scatter_tensor_parallel():
     ).cuda()
     result = fm_dist.scatter_tensor_parallel(tensor_to_scatter)
     assert torch.equal(
-        result, torch.ones((1)).cuda() * fm_dist.get_activation_tensor_parallel_rank()
+        result,
+        torch.ones((1)).cuda() * fm_dist.get_activation_tensor_parallel_rank(),
     )
 
     Utils.destroy_activation_parallel()
@@ -122,7 +127,8 @@ def test_scatter_data_parallel():
     ).cuda()
     result = fm_dist.scatter_data_parallel(tensor_to_scatter)
     assert torch.equal(
-        result, torch.ones((1)).cuda() * fm_dist.get_activation_data_parallel_rank()
+        result,
+        torch.ones((1)).cuda() * fm_dist.get_activation_data_parallel_rank(),
     )
 
     Utils.destroy_activation_parallel()

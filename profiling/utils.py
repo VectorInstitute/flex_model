@@ -47,7 +47,10 @@ class TestNetwork(nn.Module):
                 chain.from_iterable(
                     (
                         ColumnParallelLinear(
-                            model_dim, model_dim, config=config, init_method=init_method
+                            model_dim,
+                            model_dim,
+                            config=config,
+                            init_method=init_method,
                         ),
                         RowParallelLinear(
                             model_dim,
@@ -133,7 +136,9 @@ def hook_function_cpu_gather_scatter(self, inputs, outputs, acc, name):
 
     def scatter(tensor, dim=-1):
         scatter_list = list(
-            torch.chunk(tensor, mpu.get_tensor_model_parallel_world_size(), dim=dim)
+            torch.chunk(
+                tensor, mpu.get_tensor_model_parallel_world_size(), dim=dim
+            )
         )
         return scatter_list[rank]
 
@@ -180,7 +185,8 @@ class ExperimentNetworkManager:
         self.named_experiments = list(
             filter(
                 lambda attr: any(
-                    attr.startswith(prefix) for prefix in self.experiment_prefixes
+                    attr.startswith(prefix)
+                    for prefix in self.experiment_prefixes
                 ),
                 dir(self),
             )
@@ -216,7 +222,10 @@ class ExperimentNetworkManager:
         if self.network_cache is None:
             return False
 
-        cached_args, cached_kwargs = self.network_cache[:-2], self.network_cache[-2]
+        cached_args, cached_kwargs = (
+            self.network_cache[:-2],
+            self.network_cache[-2],
+        )
         for arg, c_arg in zip(args, cached_args):
             if arg != c_arg:
                 return False
@@ -235,7 +244,9 @@ class ExperimentNetworkManager:
         return network
 
     def _hook_every_layer(self, network, hook_fn):
-        module_names_to_hook = set(f"layers.{i}" for i in range(len(network.layers)))
+        module_names_to_hook = set(
+            f"layers.{i}" for i in range(len(network.layers))
+        )
         for n, m in network.named_modules():
             if n in module_names_to_hook:
                 hook_fn = functools.partial(hook_fn, name=n)
@@ -316,11 +327,15 @@ class ExperimentNetworkManager:
 
         return network
 
-    def multi_gpu_cpu_hooks_with_gather_scatter(self, model_dim, n_layers, config):
+    def multi_gpu_cpu_hooks_with_gather_scatter(
+        self, model_dim, n_layers, config
+    ):
         network = self.make_network(
             model_dim, n_layers, is_distributed=True, config=config
         )
-        hook_fn = functools.partial(hook_function_cpu_gather_scatter, acc=self.cpu_acc)
+        hook_fn = functools.partial(
+            hook_function_cpu_gather_scatter, acc=self.cpu_acc
+        )
 
         self._hook_every_layer(network, hook_fn)
 

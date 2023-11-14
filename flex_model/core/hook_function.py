@@ -283,7 +283,10 @@ class HookFunction:
 
         :param Tensor tensor: (Potentially sharded) activation tensor to parse.
         """
-        self._collect, self._disperse = dist.parse_collect_and_distribute_from_tensor(
+        (
+            self._collect,
+            self._disperse,
+        ) = dist.parse_collect_and_distribute_from_tensor(
             tensor,
             self.expected_shape,
         )
@@ -366,7 +369,9 @@ class HookFunction:
         outputs = self._template_layer_outputs(module, grad_outputs)
         return outputs
 
-    def _template_handle_tensor(self, module: nn.Module, tensor: Tensor) -> Tensor:
+    def _template_handle_tensor(
+        self, module: nn.Module, tensor: Tensor
+    ) -> Tensor:
         """Template function for editing a sharded activation tensor.
 
         This function is used alone in cases where hook functions operate
@@ -375,7 +380,12 @@ class HookFunction:
         start_shape = tensor.shape
 
         # Concretize functions.
-        fns_to_check = [self._collect, self._disperse, self._edit, self._offload]
+        fns_to_check = [
+            self._collect,
+            self._disperse,
+            self._edit,
+            self._offload,
+        ]
         fns_are_undefined = [fn is None for fn in fns_to_check]
         if all(fns_are_undefined):
             self._concretize_functions(tensor)
@@ -392,7 +402,10 @@ class HookFunction:
         self._offload(tensor)
 
         tensor = self._edit(
-            module, tensor, self._shared_state.save_ctx, self._shared_state.modules
+            module,
+            tensor,
+            self._shared_state.save_ctx,
+            self._shared_state.modules,
         )
 
         tensor = self._disperse(tensor)

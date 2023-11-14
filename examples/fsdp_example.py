@@ -68,7 +68,9 @@ def wrap_llama2_fsdp(base_model):
     cpu_offload = CPUOffload(offload_params=False)
 
     def _param_init_fn(module: nn.Module):
-        module = module.to_empty(device=torch.cuda.current_device())  # , recurse=False)
+        module = module.to_empty(
+            device=torch.cuda.current_device()
+        )  # , recurse=False)
         return module
 
     # Memory-efficient init., materialize full model params once on CPU RAM.
@@ -150,7 +152,9 @@ def main(args):
     )
 
     # Create a hook function
-    module_name = "_fsdp_wrapped_module.model.layers.30._fsdp_wrapped_module.mlp"
+    module_name = (
+        "_fsdp_wrapped_module.model.layers.30._fsdp_wrapped_module.mlp"
+    )
     hook_function = HookFunction(
         module_name=module_name,
         expected_shape=(None, None, None),
@@ -161,7 +165,9 @@ def main(args):
     model.register_forward_hook(hook_function)
 
     # Tokenize a prompt
-    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt")["input_ids"]
+    inputs = tokenizer(prompts, padding="max_length", return_tensors="pt")[
+        "input_ids"
+    ]
 
     # Split the batch across dp workers
     dp_worker_inputs = inputs.chunk(world_size, dim=0)[rank].cuda()

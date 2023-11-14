@@ -28,7 +28,9 @@ def test_register_forward_hook(opt_350m):
         activations,
     )
 
-    my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None))
+    my_hook_function = HookFunction(
+        MODULE_NAME_1, expected_shape=(None, None, None)
+    )
 
     model.register_forward_hook(my_hook_function)
 
@@ -50,8 +52,12 @@ def test_register_trainable_module(opt_350m):
     trainable_module = nn.Linear(420, 69, bias=False).cuda()
     model = FlexModel(model, activations)
 
-    my_hook_function_1 = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None))
-    my_hook_function_2 = HookFunction(MODULE_NAME_2, expected_shape=(None, None, None))
+    my_hook_function_1 = HookFunction(
+        MODULE_NAME_1, expected_shape=(None, None, None)
+    )
+    my_hook_function_2 = HookFunction(
+        MODULE_NAME_2, expected_shape=(None, None, None)
+    )
 
     model.register_forward_hook(my_hook_function_1)
     model.register_trainable_module("test", trainable_module)
@@ -117,7 +123,9 @@ def test_save_ctx(opt_350m, opt_tokenizer):
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(prompts, padding=True, return_tensors="pt")["input_ids"].cuda()
+    inputs = tokenizer(prompts, padding=True, return_tensors="pt")[
+        "input_ids"
+    ].cuda()
 
     # Function to save an activation tensor for later use. The same activation
     # tensor is also saved into the `activations` dict we passed initially to
@@ -216,7 +224,9 @@ def test_FlexModel_group_creation(opt_350m, opt_tokenizer):
     non_new_group_tensors = {**activations}
     activations.clear()
 
-    assert len(all_group_tensors) == len(new_group_tensors) + len(non_new_group_tensors)
+    assert len(all_group_tensors) == len(new_group_tensors) + len(
+        non_new_group_tensors
+    )
     for name, tensor in all_group_tensors.items():
         assert name in new_group_tensors or name in non_new_group_tensors
         if name in new_group_tensors:
@@ -229,7 +239,10 @@ def test_FlexModel_group_creation(opt_350m, opt_tokenizer):
     assert len(new_group_tensors) == 0
     assert len(non_new_group_tensors) == 0
 
-    for hook_fn, groups in model._hook_fn_group_manager.hook_fn_to_groups_map.items():
+    for (
+        hook_fn,
+        groups,
+    ) in model._hook_fn_group_manager.hook_fn_to_groups_map.items():
         if "self_attn" in hook_fn.module_name:
             assert "new_group" in groups
         assert "all" in groups

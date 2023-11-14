@@ -33,7 +33,9 @@ def test_HookFunctionGroupManager_update_by_list(opt_350m_module_names):
         (None, None, None),
         all_names=opt_350m_module_names,
     )
-    new_hf_group = [hf for hf in original_hf_group if "q_proj" in hf.module_name]
+    new_hf_group = [
+        hf for hf in original_hf_group if "q_proj" in hf.module_name
+    ]
 
     manager.update(
         new_hf_group,
