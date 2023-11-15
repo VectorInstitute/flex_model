@@ -9,3 +9,4 @@ sentencepiece
 sphinx-rtd-theme
 tokenizers
 transformers
+matplotlib
