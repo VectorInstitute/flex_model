@@ -4,9 +4,8 @@
 
 The file `induction_heads_multigpu.py` takes in a Llama-2 HuggingFace model path and outputs two plots which visualize the per token loss and a heatmap of the induction scores across all attention heads.
 
-Before running the file, you might need to insert `DummyModule` from `flex_model.core` in order to store the activation maps. `DummyModule` is just an `nn.Module` that is an identity function and its primary purpose is to allow us to attach a `HookFunction` at any arbitrary point during a forward pass. An example of this is below
+Before running the file, you need to insert `DummyModule` from `flex_model.core` in order to store the activation maps. `DummyModule` is just an `nn.Module` that is an identity function and its purpose is to allow us to attach a `HookFunction` at any arbitrary point during a forward pass. An example of this is shown below:
 
-### Llama-2 Attention Module
 ```python
 from flex_model.core import DummyModule
 ...
@@ -28,7 +27,7 @@ class LlamaAttention(nn.Module):
 ```
 You may also need to change the module string literal under the `get_module_names` function.
 
-To run the file, you can use `torchrun`. We have tested this demo by running Llama-2-70b-hf on 4x A100-80GB.
+To run the file, you can use `torchrun`. We have tested this demo by running Llama-2-70b-hf on 4x A100-80G.
 ```
 torchrun --nnodes=1 --nproc-per-node=4 induction_heads_multigpu.py --model_path /path/to/llama
 ```

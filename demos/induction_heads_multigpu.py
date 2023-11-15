@@ -31,9 +31,14 @@ from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 from flex_model.core import FlexModel, HookFunction
 
 
+LOCAL_RANK = None
+
+
 def setup() -> None:
     """Instantiate process group."""
     dist.init_process_group("nccl")
+    global LOCAL_RANK
+    LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
 
 
 def cleanup() -> None:
@@ -45,23 +50,23 @@ def args() -> Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, required=True)
+    parser.add_argument("--seq_length", default=50, type=int, required=False)
     return parser.parse_args()
 
 
-def setup_model(model_path: str, rank: int) -> tuple[nn.Module, LlamaConfig]:
+def setup_model(model_path: str) -> tuple[nn.Module, LlamaConfig]:
     """Instantiate model, tokenizer, and config.
 
     Args:
     ----
         model_path: A path to the model being instantiated
-        rank: The worker rank
 
     Returns:
     -------
         A tuple of length two containing the model and the config.
     """
     config = LlamaConfig.from_pretrained(model_path)
-    if rank == 0:
+    if LOCAL_RANK == 0:
         model = LlamaForCausalLM.from_pretrained(
             model_path, torch_dtype=torch.bfloat16,
         )
@@ -73,12 +78,8 @@ def setup_model(model_path: str, rank: int) -> tuple[nn.Module, LlamaConfig]:
     return model, config
 
 
-def fsdp_config(rank: int) -> dict[str: Any]:
+def fsdp_config() -> dict[str: Any]:
     """Return the config to be used by FSDP.
-
-    Args:
-    ----
-        rank: The worker rank
 
     Returns:
     -------
@@ -100,7 +101,7 @@ def fsdp_config(rank: int) -> dict[str: Any]:
     sharding_strategy = ShardingStrategy.FULL_SHARD
     device_id = torch.cuda.current_device()
     sync_module_states = True
-    param_init_fn = _module_init_fn if rank != 0 else None
+    param_init_fn = _module_init_fn if LOCAL_RANK != 0 else None
     mp_policy = MixedPrecision(
         param_dtype=torch.bfloat16,
         buffer_dtype=torch.bfloat16,
@@ -119,11 +120,12 @@ def fsdp_config(rank: int) -> dict[str: Any]:
 
 
 def calculate_induction_score(
-        config: LlamaConfig,
-        activation_dict: dict[str, torch.Tensor],
-        module_names: list[str],
-        sequence_length: int,
-    ) -> None:
+    num_hidden_layers: int,
+    num_attention_heads: int,
+    activation_dict: dict[str, torch.Tensor],
+    module_names: list[str],
+    sequence_length: int,
+) -> None:
     """Calculate and save a heatmap of the induction scores for each attention
     head.
 
@@ -137,27 +139,46 @@ def calculate_induction_score(
         sequence_length: The sequence length of the prompt passed into the
             model
     """
+
+    # Create the matrix to store the induction scores for each head across 
+    # all layers
     induction_score_store = torch.zeros(
         (
-            config.num_hidden_layers,
-            config.num_attention_heads,
+            num_hidden_layers,
+            num_attention_heads,
         ),
         device=torch.cuda.current_device(),
     )
 
     for i, module_name in enumerate(module_names):
+        
+        # Retrieve the gathered activation maps for a given module
         attn_maps = activation_dict[module_name][0].detach().to(
             torch.cuda.current_device(),
         )
+        print(attn_maps.shape)
+
+        # Attention maps are of shape [batch, head, seq, seq]
+
+        # We take the diagonal over the last two dims i.e. the query/key dims
+
+        # We offset by 1-sequence_length because we want to see how much
+        # attention is paid from the *current* token to the token that occurred
+        # right after the *previous occurrence* of the *current* token (which
+        # is 1-sequence_length tokens back). A better visualization can be
+        # found on Anthropic's In-context Learning and Induction Heads paper
         induction_stripe = attn_maps.diagonal(
             dim1=-2, dim2=-1, offset=1-sequence_length,
         )
+
+        # We average across the diagonal and the batch dims to get the final
+        # induction scores
         induction_score = einops.reduce(
             induction_stripe, "batch head_index position -> head_index", "mean",
         )
         induction_score_store[i, :] = induction_score
 
-    plt.imshow(induction_score_store.cpu().numpy(), origin="lower")
+    plt.imshow(induction_score_store.detach().cpu().numpy(), origin="lower")
     plt.xlabel("Head")
     plt.ylabel("Layer")
     plt.title("Induction Score by Head")
@@ -165,7 +186,7 @@ def calculate_induction_score(
     plt.savefig("induction_score_by_head.png", bbox_inches="tight")
 
 
-def get_module_names(config: LlamaConfig) -> list[str]:
+def get_module_names(num_hidden_layers: int) -> list[str]:
     """Return the list of module names to apply hooks onto.
 
     Args:
@@ -176,18 +197,18 @@ def get_module_names(config: LlamaConfig) -> list[str]:
     -------
         A list of model names that we're applying HookFunctions to
     """
-    name_placeholder = """_fsdp_wrapped_module.model.layers.
-        {}._fsdp_wrapped_module.self_attn.dummy"""
+    prefix = "_fsdp_wrapped_module.model.layers."
+    postfix = "._fsdp_wrapped_module.self_attn.dummy"
     module_names = [
-        name_placeholder.format(i) for i in range(config.num_hidden_layers)
+        f"{prefix}{i}{postfix}" for i in range(num_hidden_layers)
     ]
     return module_names
 
 
 def calculate_per_token_loss(
-        logits: torch.Tensor,
-        prompt: torch.Tensor,
-    ) -> None:
+    logits: torch.Tensor,
+    prompt: torch.Tensor,
+) -> None:
     """Calculate and plot the cross-entropy loss per token.
 
     Args:
@@ -196,7 +217,22 @@ def calculate_per_token_loss(
         prompt: The input prompt sequence
     """
     # Calculate per token loss
+
+    # First take log softmax across the vocab dim to get log probabilities
     log_probs = F.log_softmax(logits, dim=-1)
+
+
+    # log_probs[..., :-1, :] takes the log probs up to the final token while
+    # keeping the shape the same.
+
+    # .gather(...) collects the correct log probs across the vocab dim given
+    # the prompt
+
+    # The reason we need prompt[..., 1:, None] is to ensure that the index
+    # argument has the same rank as log_probs
+
+    # Finally, we need [..., 0] at the end so that we get rid of the extra
+    # trailing rank we created (we also could've done a .squeeze())
     predicted_log_probs = -log_probs[..., :-1, :].gather(
         dim=-1, index=prompt[..., 1:, None],
     )[..., 0]
@@ -223,19 +259,23 @@ def main(args: Namespace) -> None:
     ----
         args: Command-line arguments
     """
-    rank = int(os.environ.get("LOCAL_RANK", 0))
-    torch.cuda.set_device(rank)
+    torch.cuda.set_device(LOCAL_RANK)
 
-    seq_len = 50
+    seq_len = args.seq_length
+    batch_size = 4
+    min_vocab_idx, max_vocab_idx = 500, 15000
+
     prompt = torch.randint(
-        500, 15000, (4, seq_len)).to(torch.cuda.current_device(),
+        min_vocab_idx,
+        max_vocab_idx,
+        (batch_size, seq_len)).to(torch.cuda.current_device(),
     )
     repeated_tokens = einops.repeat(
         prompt, "batch seq_len -> batch (2 seq_len)",
     )
 
-    model, config = setup_model(args.model_path, rank)
-    fsdp_cfg = fsdp_config(rank)
+    model, config = setup_model(args.model_path)
+    fsdp_cfg = fsdp_config()
 
     model = FSDP(
         model,
@@ -251,9 +291,8 @@ def main(args: Namespace) -> None:
     )
 
     # Register hooks for activations
-    module_names = get_module_names(config)
-    for i in range(config.num_hidden_layers):
-        module_name = module_names[i]
+    module_names = get_module_names(config.num_hidden_layers)
+    for module_name in module_names:
         model.register_forward_hook(
             HookFunction(
                 module_name,
@@ -266,7 +305,8 @@ def main(args: Namespace) -> None:
     # Do plotting on main rank
     if dist.get_rank() == 0:
         calculate_induction_score(
-            config,
+            config.num_hidden_layers,
+            config.num_attention_heads,
             output_dict,
             module_names,
             seq_len,
