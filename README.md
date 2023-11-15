@@ -1,5 +1,5 @@
 # FlexModel
-|docs|
+[![Documentation Status](https://readthedocs.org/projects/flexmodel/badge/?version=latest)](https://flexmodel.readthedocs.io/en/latest/)
 
 `FlexModel` is a tool designed for distributed interpretability of Large
 Language Models (LLMs). `FlexModel` allows you to retrieve and/or edit
@@ -116,8 +116,3 @@ Multi-gpu tests are run via `submitit` on a `slurm` cluster. Navigate to
 python run_multi_gpu_tests_slurm.py
 ```
 The multi-gpu tests require 4 GPUs to run.
-
-
-
-.. |docs| image:: https://readthedocs.org/projects/flexmodel/badge/?version=latest
-	:target: https://flexmodel.readthedocs.io/en/latest/
