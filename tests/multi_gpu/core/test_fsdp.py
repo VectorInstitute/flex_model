@@ -21,7 +21,7 @@ from tests.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
 (
     register_fsdp_test,
     get_fsdo_test,
-) = make_test_registry("fsdp", SlurmJobResourceSpec())
+) = make_test_registry("fsdp", SlurmJobResourceSpec(time=10))
 
 
 logger = logging.getLogger(__name__)
@@ -250,7 +250,7 @@ def test_fsdp_llama():
         )
 
     for chunk in chunked_inputs:
-        _ = flex_model(inputs)
+        _ = flex_model(inputs.cuda())
         for k, v in single_gpu_activations.items():
             all_single_gpu_activations[k] = v
         single_gpu_activations.clear()
@@ -264,3 +264,5 @@ def test_fsdp_llama():
             f"Failed: {k}, max diff: "
             f"{(all_single_gpu_activations[k] - multi_gpu_activations_[k]).abs().max()}"
         )
+
+    logger.info("Tests successful.")
