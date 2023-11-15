@@ -30,7 +30,6 @@ from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
 from flex_model.core import FlexModel, HookFunction
 
-
 LOCAL_RANK = None
 
 
@@ -131,7 +130,8 @@ def calculate_induction_score(
 
     Args:
     ----
-        config: The model's HF config
+        num_hidden_layers: The number of transformer blocks in the model
+        num_attention_heads: The number of attention heads in the model
         activation_dict: Dictionary containing the activations retrieved using
             FlexModel
         module_names: A list of the module names to which we have attached
@@ -139,8 +139,7 @@ def calculate_induction_score(
         sequence_length: The sequence length of the prompt passed into the
             model
     """
-
-    # Create the matrix to store the induction scores for each head across 
+    # Create the matrix to store the induction scores for each head across
     # all layers
     induction_score_store = torch.zeros(
         (
@@ -151,12 +150,11 @@ def calculate_induction_score(
     )
 
     for i, module_name in enumerate(module_names):
-        
+
         # Retrieve the gathered activation maps for a given module
         attn_maps = activation_dict[module_name][0].detach().to(
             torch.cuda.current_device(),
         )
-        print(attn_maps.shape)
 
         # Attention maps are of shape [batch, head, seq, seq]
 
@@ -191,7 +189,7 @@ def get_module_names(num_hidden_layers: int) -> list[str]:
 
     Args:
     ----
-        config: The model's config
+        num_hidden_layers: The number of transformer blocks in the model
 
     Returns:
     -------
