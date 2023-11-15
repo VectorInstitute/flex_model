@@ -1,5 +1,40 @@
+# FlexModel
+|docs|
+
+`FlexModel` is a tool designed for distributed interpretability of Large
+Language Models (LLMs). `FlexModel` allows you to retrieve and/or edit
+**unsharded** activations within your LLM (among other things). `FlexModel`
+wraps any `torch.nn.Module`, and exposes endpoints for registering
+`HookFunction`s. It is the `HookFunction`'s job to retrieve activations and/or
+edit them within the wrapped model. To edit an activation (which will affect
+subsequent model operation), you can simply provide your `HookFunction` with
+an editing function. The best part is that the editing function can contain
+arbitrary code, and runs single-threaded. So you don't have to worry about any
+SPMD parallelism in your editing function! `FlexModel` is also designed to be
+robust to LLM parallelism strategies, which are typically 3-dimensional (ie.
+tensor parallel, data parallel, pipeline parallel). For more information on
+how `FlexModel` works, see our [docs](https://flexmodel.readthedocs.io/en/latest/)
+or the paper (coming soon). We'll also be continually adding new demos/examples
+inside their respective folders. Feel free to raise any issues about bugs or
+requests for new features!
+
+## What's a hook function?
+PyTorch exposes endpoints in each `torch.nn.Module`, which calls your
+"hook function" at a specified time during module operation. There's a great
+introductory blogpost
+[here](https://web.stanford.edu/~nanbhas/blog/forward-hooks-pytorch/).
+
+## Why not just use PyTorch hooks?
+Vanilla PyTorch hooks work great for single-gpu/process models. However if you
+need access to full activations for retrieval/editing, then you'll need to
+figure out how to unshard them in each hook function. Given the parallelism
+dimensions, `FlexModel` can figure out which collectives to call if necessary,
+so your activations are always unsharded.
+
+
 # Installation
 Run `pip install -e .` from the root directory. PyPi package coming soon!
+
 
 # Important Notes
 - Make sure to replace any instances of `module.forward(inputs)` with
@@ -9,6 +44,7 @@ the forward function of a module (this is the case with LLaMA).
 wrapped model, you can place `DummyModule`s with identity forward functions
 which can be hooked into. `DummyModule` is located in the `core/core_utils.py`
 file.
+
 
 # Usage
 Here's a short example on how you would use the FlexModel and HookFunction
@@ -66,6 +102,7 @@ flex_model.register_forward_hook(hook_function)
 model.forward(inputs)
 ```
 
+
 # Running Tests
 Running single-gpu tests in the `tests/` folder using `pytest` can be done with
 the command:
@@ -79,3 +116,8 @@ Multi-gpu tests are run via `submitit` on a `slurm` cluster. Navigate to
 python run_multi_gpu_tests_slurm.py
 ```
 The multi-gpu tests require 4 GPUs to run.
+
+
+
+.. |docs| image:: https://readthedocs.org/projects/flexmodel/badge/?version=latest
+	:target: https://flexmodel.readthedocs.io/en/latest/
