@@ -3,3 +3,4 @@ from .test_fairscale_megatron import (
     test_FairscaleLayers,
     test_forward_hooks_FairscaleLayers,
 )
+from .test_fsdp import test_fsdp_llama

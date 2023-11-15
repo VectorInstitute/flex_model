@@ -12,10 +12,10 @@ def test_flatten_and_unflatten():
         (torch.ones((1)).cuda() * 2, torch.ones((1)).cuda() * 3),
     ]
     treedef, leaves = flatten(layer_output)
-    for i, l in enumerate(leaves):
-        assert torch.equal(l, torch.ones((1)).cuda() * (i + 1))
+    for i, leaf_ten in enumerate(leaves):
+        assert torch.equal(leaf_ten, torch.ones((1)).cuda() * (i + 1))
 
-    edited_leaves = [l * 2 for l in leaves]
+    edited_leaves = [leaf_ten * 2 for leaf_ten in leaves]
 
     result = unflatten(treedef, edited_leaves)
     new_treedef, new_leaves = flatten(result)

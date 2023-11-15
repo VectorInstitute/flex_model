@@ -5,7 +5,6 @@ from typing import List, Optional
 
 import torch
 import torch.distributed as pt_dist
-from accelerate import PartialState
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +70,10 @@ class GPUDeviceMesh:
         if world_size == 1:
             return cls([[0]], [[0]], [[0]])
 
-        num_tp_groups = world_size // tensor_parallel_size
-        num_pp_groups = 1
-        num_dp_groups = pipeline_parallel_size
-
         mesh = torch.arange(world_size).reshape(
-            pipeline_parallel_size, data_parallel_size, tensor_parallel_size,
+            pipeline_parallel_size,
+            data_parallel_size,
+            tensor_parallel_size,
         )
 
         # Build tensor parallel groups
@@ -133,15 +130,21 @@ class DistributedBackend(ABC):
         ...
 
     @abstractmethod
-    def get_activation_tensor_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_tensor_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         ...
 
     @abstractmethod
-    def get_activation_data_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_data_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         ...
 
     @abstractmethod
-    def get_activation_pipeline_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_pipeline_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         ...
 
     @abstractmethod
@@ -263,7 +266,11 @@ class TorchDistributedBackend(DistributedBackend):
             initialized.
         :rtype: bool
         """
-        if self.tp_group is None and self.dp_group is None and self.pp_group is None:
+        if (
+            self.tp_group is None
+            and self.dp_group is None
+            and self.pp_group is None
+        ):
             return False
         return True
 
@@ -291,7 +298,9 @@ class TorchDistributedBackend(DistributedBackend):
         """
         return self.dp_group is not None
 
-    def get_activation_tensor_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_tensor_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the tensor parallel group handle the local device belongs to.
 
         :returns: The tensor parallel distributed group.
@@ -303,7 +312,9 @@ class TorchDistributedBackend(DistributedBackend):
         assert self.activation_parallel_is_initialized()
         return self.tp_group
 
-    def get_activation_pipeline_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_pipeline_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the pipeline parallel group handle the local device belongs to.
 
         :returns: The pipeline parallel distributed group.
@@ -315,7 +326,9 @@ class TorchDistributedBackend(DistributedBackend):
         assert self.activation_parallel_is_initialized()
         return self.pp_group
 
-    def get_activation_data_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_data_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the data parallel group handle the local device belongs to.
 
         :returns: The data parallel distributed group.
@@ -401,8 +414,7 @@ class TorchDistributedBackend(DistributedBackend):
         return pt_dist.get_rank(group=self.dp_group)
 
     def destroy_activation_parallel(self) -> None:
-        """Delete all handles to tensor, pipeline and data parallel groups.
-        """
+        """Delete all handles to tensor, pipeline and data parallel groups."""
         self.all_tp_groups = None
         self.all_pp_groups = None
         self.all_dp_groups = None
@@ -503,7 +515,11 @@ class AccelerateDistributedBackend(DistributedBackend):
             initialized.
         :rtype: bool
         """
-        if self.tp_group is None and self.dp_group is None and self.pp_group is None:
+        if (
+            self.tp_group is None
+            and self.dp_group is None
+            and self.pp_group is None
+        ):
             return False
         return True
 
@@ -531,7 +547,9 @@ class AccelerateDistributedBackend(DistributedBackend):
         """
         return self.dp_group is not None
 
-    def get_activation_tensor_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_tensor_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the tensor parallel group handle the local device belongs to.
 
         :returns: The tensor parallel distributed group.
@@ -543,7 +561,9 @@ class AccelerateDistributedBackend(DistributedBackend):
         assert self.activation_parallel_is_initialized()
         return self.tp_group
 
-    def get_activation_pipeline_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_pipeline_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the pipeline parallel group handle the local device belongs to.
 
         :returns: The pipeline parallel distributed group.
@@ -555,7 +575,9 @@ class AccelerateDistributedBackend(DistributedBackend):
         assert self.activation_parallel_is_initialized()
         return self.pp_group
 
-    def get_activation_data_parallel_group(self) -> Optional[pt_dist.ProcessGroup]:
+    def get_activation_data_parallel_group(
+        self
+    ) -> Optional[pt_dist.ProcessGroup]:
         """Get the data parallel group handle the local device belongs to.
 
         :returns: The data parallel distributed group.
@@ -641,8 +663,7 @@ class AccelerateDistributedBackend(DistributedBackend):
         return pt_dist.get_rank(group=self.dp_group)
 
     def destroy_activation_parallel(self) -> None:
-        """Delete all handles to tensor, pipeline and data parallel groups.
-        """
+        """Delete all handles to tensor, pipeline and data parallel groups."""
         self.all_tp_groups = None
         self.all_pp_groups = None
         self.all_dp_groups = None

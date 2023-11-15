@@ -1,13 +1,9 @@
-from argparse import Namespace
 from functools import partial
 
-import pytest
 import torch
 import torch.nn as nn
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from flex_model.core import FlexModel, HookFunction
-from tests.fixtures import opt_350m, opt_tokenizer
 
 MODULE_NAME_1 = "model.decoder.layers.17.fc2"
 MODULE_NAME_2 = "model.decoder.layers.18.fc2"
@@ -19,17 +15,22 @@ PROMPTS = [
 ]
 
 
-def test_register_forward_hook(opt_350m):
+def test_register_forward_hook(make_opt_350m):
     """
     Tests if a hook function is registered correctly, and if the fields are set
     appropriately.
     """
-    model = opt_350m.cuda()
+    model = make_opt_350m().cuda()
 
     activations = {}
-    model = FlexModel(model, activations,)
+    model = FlexModel(
+        model,
+        activations,
+    )
 
-    my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None))
+    my_hook_function = HookFunction(
+        MODULE_NAME_1, expected_shape=(None, None, None)
+    )
 
     model.register_forward_hook(my_hook_function)
 
@@ -39,20 +40,24 @@ def test_register_forward_hook(opt_350m):
     assert my_hook_function._shared_state.offload_mode == "CPU"
 
 
-def test_register_trainable_module(opt_350m):
+def test_register_trainable_module(make_opt_350m):
     """
     Tests if a trainable module is registered correctly, and that all hook
     functions (regardless of when they're added), have a pointer to this
     module.
     """
-    model = opt_350m.cuda()
+    model = make_opt_350m().cuda()
 
     activations = {}
     trainable_module = nn.Linear(420, 69, bias=False).cuda()
     model = FlexModel(model, activations)
 
-    my_hook_function_1 = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None))
-    my_hook_function_2 = HookFunction(MODULE_NAME_2, expected_shape=(None, None, None))
+    my_hook_function_1 = HookFunction(
+        MODULE_NAME_1, expected_shape=(None, None, None)
+    )
+    my_hook_function_2 = HookFunction(
+        MODULE_NAME_2, expected_shape=(None, None, None)
+    )
 
     model.register_forward_hook(my_hook_function_1)
     model.register_trainable_module("test", trainable_module)
@@ -64,20 +69,26 @@ def test_register_trainable_module(opt_350m):
     assert my_hook_function_2._shared_state.modules["test"] is trainable_module
 
 
-def test_destroy(opt_350m):
+def test_destroy(make_opt_350m):
     """
     Tests the destroy method to ensure everything is cleared appropriately.
     """
-    model = opt_350m.cuda()
+    model = make_opt_350m().cuda()
 
     activations = {}
     trainable_module_1 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
     trainable_module_2 = nn.Linear(420, 69, bias=False).cuda().requires_grad_()
-    model = FlexModel(model, activations,)
+    model = FlexModel(
+        model,
+        activations,
+    )
     model.register_trainable_module("test1", trainable_module_1)
     model.register_trainable_module("test2", trainable_module_2)
 
-    my_hook_function = HookFunction(MODULE_NAME_1, expected_shape=(None, None, None),)
+    my_hook_function = HookFunction(
+        MODULE_NAME_1,
+        expected_shape=(None, None, None),
+    )
 
     model.register_forward_hook(my_hook_function)
     model = model.module  # Calls FlexModel.__exit__().
@@ -97,8 +108,8 @@ def test_destroy(opt_350m):
             assert len(getattr(m, attr)) == 0
 
 
-def test_save_ctx(opt_350m, opt_tokenizer):
-    model = opt_350m.cuda()
+def test_save_ctx(make_opt_350m, opt_tokenizer):
+    model = make_opt_350m().cuda()
 
     tokenizer = opt_tokenizer
 
@@ -112,7 +123,9 @@ def test_save_ctx(opt_350m, opt_tokenizer):
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(prompts, padding=True, return_tensors="pt")["input_ids"].cuda()
+    inputs = tokenizer(prompts, padding=True, return_tensors="pt")[
+        "input_ids"
+    ].cuda()
 
     # Function to save an activation tensor for later use. The same activation
     # tensor is also saved into the `activations` dict we passed initially to
@@ -129,7 +142,9 @@ def test_save_ctx(opt_350m, opt_tokenizer):
         return inputs
 
     retrieve_hook_fn = HookFunction(
-        "model.decoder.layers.12", (None, None, None), retrieve_fn,
+        "model.decoder.layers.12",
+        (None, None, None),
+        retrieve_fn,
     )
     verify_hook_fn = HookFunction(
         "model.decoder.layers.18",
@@ -143,12 +158,13 @@ def test_save_ctx(opt_350m, opt_tokenizer):
 
     # Verify that the two verions of the same tensor are equal
     assert torch.equal(
-        activations["save_ctx_activation"], activations["model.decoder.layers.12"][0],
+        activations["save_ctx_activation"],
+        activations["model.decoder.layers.12"][0],
     )
 
 
-def test_FlexModel_group_all(opt_350m):
-    model = opt_350m.cuda()
+def test_FlexModel_group_all(make_opt_350m):
+    model = make_opt_350m().cuda()
 
     activations = {}
     model = FlexModel(model, activations)
@@ -167,8 +183,8 @@ def test_FlexModel_group_all(opt_350m):
         assert group == set(["all"])
 
 
-def test_FlexModel_group_creation(opt_350m, opt_tokenizer):
-    model = opt_350m.cuda()
+def test_FlexModel_group_creation(make_opt_350m, opt_tokenizer):
+    model = make_opt_350m().cuda()
     prompts = [
         "It's a nice day we're having",
         "The capital of Canada is",
@@ -182,15 +198,12 @@ def test_FlexModel_group_creation(opt_350m, opt_tokenizer):
     activations = {}
     model = FlexModel(model, activations)
 
-    layers = [
-        f"model.decoder.layers.{i}"
-        for i in range(len(model.module.model.decoder.layers))
-    ]
-
     # Run the model forward pass on a group, on the hook functions not in the
     # group, and on all hook functions.
     model.create_hook_group(
-        "new_group", "self_attn", (None, None, None),
+        "new_group",
+        "self_attn",
+        (None, None, None),
     )
 
     _ = model(inputs)
@@ -211,7 +224,9 @@ def test_FlexModel_group_creation(opt_350m, opt_tokenizer):
     non_new_group_tensors = {**activations}
     activations.clear()
 
-    assert len(all_group_tensors) == len(new_group_tensors) + len(non_new_group_tensors)
+    assert len(all_group_tensors) == len(new_group_tensors) + len(
+        non_new_group_tensors
+    )
     for name, tensor in all_group_tensors.items():
         assert name in new_group_tensors or name in non_new_group_tensors
         if name in new_group_tensors:
@@ -224,7 +239,10 @@ def test_FlexModel_group_creation(opt_350m, opt_tokenizer):
     assert len(new_group_tensors) == 0
     assert len(non_new_group_tensors) == 0
 
-    for hook_fn, groups in model._hook_fn_group_manager.hook_fn_to_groups_map.items():
+    for (
+        hook_fn,
+        groups,
+    ) in model._hook_fn_group_manager.hook_fn_to_groups_map.items():
         if "self_attn" in hook_fn.module_name:
             assert "new_group" in groups
         assert "all" in groups

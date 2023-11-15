@@ -1,40 +1,26 @@
 import functools
 import logging
-import time
 import weakref
 from argparse import Namespace
 from collections import defaultdict
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
-    Collection,
     Dict,
-    Generator,
-    Iterator,
     List,
     Optional,
-    Sequence,
     Set,
     Tuple,
     Union,
 )
 
 import torch
-import torch.multiprocessing as mp
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 import flex_model.distributed as dist
-from flex_model.traverse import (
-    InternalObject,
-    LeafObject,
-    ScalarObject,
-    flatten,
-    unflatten,
-)
 
 from .hook_function import HookFunction
 
@@ -109,15 +95,21 @@ class _HookFunctionGroupManager:
 
     @functools.singledispatchmethod
     def update(self, group_constructor, group_name) -> None:
-        raise NotImplementedError(f"Cannot make group using: {type(group_constructor)}")
+        raise NotImplementedError(
+            f"Cannot make group using: {type(group_constructor)}"
+        )
 
     @update.register
     def _update_by_list_hook_fns(
         self, group_constructor: list, group_name: str
     ) -> None:
         """Add group tag to a collection of hook functions."""
-        are_hook_fns = map(lambda x: isinstance(x, HookFunction), group_constructor)
-        assert all(are_hook_fns), f"set_group takes a collection of only HookFunctions"
+        are_hook_fns = map(
+            lambda x: isinstance(x, HookFunction), group_constructor
+        )
+        assert all(
+            are_hook_fns
+        ), "set_group takes a collection of only HookFunctions"
 
         # Associate the hook functions with this group.
         for hook_fn in group_constructor:
@@ -137,7 +129,9 @@ class _HookFunctionGroupManager:
             self.groups.add(group_name)
 
     @update.register
-    def _update_by_string(self, group_constructor: str, group_name: str) -> None:
+    def _update_by_string(
+        self, group_constructor: str, group_name: str
+    ) -> None:
         """Pattern-match existing hook functions using group constrcutor."""
         hook_functions_to_add = []
         for hook_fn, groups in self.hook_fn_to_groups_map.items():
@@ -154,7 +148,10 @@ class _HookFunctionGroupManager:
     def _is_group_alive(self, group_name: str) -> bool:
         """A group is alive if it has one or more associated hook functions."""
         return any(
-            map(lambda gs: group_name in gs, list(self.hook_fn_to_groups_map.values()))
+            map(
+                lambda gs: group_name in gs,
+                list(self.hook_fn_to_groups_map.values()),
+            )
         )
 
     @functools.singledispatchmethod
@@ -165,10 +162,12 @@ class _HookFunctionGroupManager:
     def _remove_by_list_hook_fns(
         self, group_constructor: list, group_name: str
     ) -> None:
-        are_hook_fns = map(lambda x: isinstance(x, HookFunction), group_constructor)
+        are_hook_fns = map(
+            lambda x: isinstance(x, HookFunction), group_constructor
+        )
         assert all(
             are_hook_fns
-        ), f"remove (list) takes a collection of only HookFunctions"
+        ), "remove (list) takes a collection of only HookFunctions"
         assert group_name != "all", "Can't remove 'all' group references"
 
         for hook_fn in group_constructor:
@@ -188,7 +187,9 @@ class _HookFunctionGroupManager:
             self.groups.remove(group_name)
 
     @remove.register
-    def _remove_by_string(self, group_constructor: str, group_name: str) -> None:
+    def _remove_by_string(
+        self, group_constructor: str, group_name: str
+    ) -> None:
         assert group_name != "all", "Can't remove 'all' group references"
         hook_functions_to_remove = []
         for hook_fn, groups in self.hook_fn_to_groups_map.items():
@@ -201,7 +202,9 @@ class _HookFunctionGroupManager:
         if not self._is_group_alive(group_name):
             self.groups.remove(group_name)
 
-    def bisect(self, active_group_names: Union[str, List[str]]) -> Set[HookFunction]:
+    def bisect(
+        self, active_group_names: Union[str, List[str]]
+    ) -> Set[HookFunction]:
         """Separate all hook functions into active/inactive sets."""
         if isinstance(active_group_names, str):
             active_group_names = [active_group_names]
@@ -225,8 +228,9 @@ class _HookFunctionGroupManager:
 
 def _finalize_dangling_state(
     hook_functions: Dict[
-        Union[nn.Module, Tensor], Dict[HookFunction, torch.utils.hooks.RemovableHandle],
-    ]
+        Union[nn.Module, Tensor],
+        Dict[HookFunction, torch.utils.hooks.RemovableHandle],
+    ],
 ) -> None:
     """Clear persistent state when FlexModel is garbage collected."""
     # Remove hook functions from model.
@@ -359,7 +363,10 @@ class FlexModel(nn.Module):
         if torch.distributed.is_initialized():
             world_size = self.tp_size * self.pp_size * self.dp_size
             dist.initialize_distributed_backend(
-                world_size, self.tp_size, self.pp_size, self.dp_size,
+                world_size,
+                self.tp_size,
+                self.pp_size,
+                self.dp_size,
             )
             dist.initialize_activation_parallel()
 
@@ -369,7 +376,10 @@ class FlexModel(nn.Module):
 
         # Create shared state between FM instance and HF instances.
         self._shared_state = _SharedState(
-            self.output_ptr, self.save_ctx, self.trainable_modules, self.offload_mode,
+            self.output_ptr,
+            self.save_ctx,
+            self.trainable_modules,
+            self.offload_mode,
         )
         self._hook_fn_group_manager = _HookFunctionGroupManager()
 
@@ -389,7 +399,9 @@ class FlexModel(nn.Module):
 
         # Setup finalizer for cleanup.
         self._finalizer = weakref.finalize(
-            self, _finalize_dangling_state, self._module_to_hook_fns_map,
+            self,
+            _finalize_dangling_state,
+            self._module_to_hook_fns_map,
         )
 
     def _enable_hooks(self, active_hooks: Set[HookFunction]) -> None:
@@ -414,7 +426,9 @@ class FlexModel(nn.Module):
             and dist.in_pipeline_parallel_group()
             and dist.get_activation_pipeline_parallel_world_size() > 1
         ):
-            gathered_acts = dist.gather_pipeline_parallel_tensor_dicts(self.output_ptr)
+            gathered_acts = dist.gather_pipeline_parallel_tensor_dicts(
+                self.output_ptr
+            )
 
             # Rank 0 accumulates the activation tensors.
             if dist.get_activation_pipeline_parallel_rank() == 0:
@@ -533,6 +547,7 @@ class FlexModel(nn.Module):
         self._hook_fn_group_manager.update(group_constructor, group_name)
 
     def remove_hook_groups(
+        self,
         group_constructor: Union[List[HookFunction], HookFunction, str],
         group_name: str,
     ) -> None:
@@ -620,7 +635,9 @@ class FlexModel(nn.Module):
         """
         self._register_hook_prologue(hook_function, "forward_pre")
 
-    def register_full_backward_pre_hook(self, hook_function: HookFunction) -> None:
+    def register_full_backward_pre_hook(
+        self, hook_function: HookFunction
+    ) -> None:
         """Register a pre-backward hook function.
 
         :param HookFunction hook_function: `HookFunction` instance to register.
@@ -639,7 +656,9 @@ class FlexModel(nn.Module):
         self.trainable_modules[name] = module
 
     def get_module_parameter(
-        self, parameter_name: str, expected_shape: Tuple[int, ...],
+        self,
+        parameter_name: str,
+        expected_shape: Tuple[int, ...],
     ) -> Tensor:
         """Retrieves unsharded parameter from wrapped module.
 
@@ -668,7 +687,8 @@ class FlexModel(nn.Module):
 
         local_param = self.module.get_parameter(parameter_name).detach()
         collect_fn = dist.parse_collect_from_parameter_tensor(
-            local_param, expected_shape,
+            local_param,
+            expected_shape,
         )
         full_param = collect_fn(local_param).cpu()
         return full_param

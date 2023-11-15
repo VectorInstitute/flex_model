@@ -5,10 +5,8 @@ from typing import Dict
 import pytest
 import torch
 import torch.nn as nn
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from flex_model.core import FlexModel, HookFunction
-from tests.fixtures import opt_350m, opt_tokenizer
 
 # could be any MLP layer and the code won't break. The test doesn't generalize
 # to other kinds of layers
@@ -62,16 +60,12 @@ def editing_func(
 
 
 # Call fixture twice.
-opt_350m_gt = opt_350m
-opt_350m_hook = opt_350m
-
-
 @pytest.mark.parametrize("offload_mode", ["CPU", "GPU"])
-def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer, offload_mode):
+def test_hook_function(make_opt_350m, opt_tokenizer, offload_mode):
     """
     Tests if HookFunction implements a forward hook correctly
     """
-    model = opt_350m_gt.cuda().eval()
+    model = make_opt_350m().cuda().eval()
     tokenizer = opt_tokenizer
 
     prompts = [
@@ -81,7 +75,11 @@ def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer, offload_mode):
         "There's about three people going to",
     ]
 
-    inputs = tokenizer(prompts, padding=True, return_tensors="pt",)["input_ids"].cuda()
+    inputs = tokenizer(
+        prompts,
+        padding=True,
+        return_tensors="pt",
+    )["input_ids"].cuda()
 
     # first get our ground truth activations
     inject_layer = LayerInjection(MODULE_NAME, model).to(model.dtype).cuda()
@@ -91,7 +89,7 @@ def test_hook_function(opt_350m_gt, opt_350m_hook, opt_tokenizer, offload_mode):
     ground_truth = inject_layer.saved_out.cpu()
 
     # now try with HookFunction API
-    model = opt_350m_hook.cuda().eval()
+    model = make_opt_350m().cuda().eval()
 
     # ensure the layer injection is out
     for _, m in model.named_modules():

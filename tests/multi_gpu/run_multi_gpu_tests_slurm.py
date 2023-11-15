@@ -1,8 +1,7 @@
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 
 import submitit
-import torch
 
 from tests.multi_gpu.registry import (
     SlurmJobResourceSpec,
@@ -43,7 +42,7 @@ class TorchDistributedTestBatch:
         for name, fn in self.test_functions.items():
             try:
                 print(f"Running test: {name}")
-                res = fn()
+                _res = fn()
                 if dist_env.rank == 0:
                     test_results[name] = 0  # Success.
 
@@ -99,7 +98,7 @@ class MultiGPUSlurmJob:
 
 def main():
     # Import folders to register tests.
-    from tests.multi_gpu import core, distributed
+    from tests.multi_gpu import core, distributed  # noqa: F401
 
     test_registries = get_multigpu_test_registry()
 
@@ -122,7 +121,8 @@ def main():
     for test_batch_name in test_registries.keys():
         assert test_batch_name in test_resource_specs
         test_slurm_jobs[test_batch_name] = MultiGPUSlurmJob(
-            test_batches[test_batch_name], test_resource_specs[test_batch_name],
+            test_batches[test_batch_name],
+            test_resource_specs[test_batch_name],
         )
 
     # Run each job.

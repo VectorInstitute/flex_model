@@ -9,9 +9,8 @@ _MULTIGPU_RESOURCE_SPECS = None
 class SlurmJobResourceSpec:
     """Resource specification for a single slurm job."""
 
-    partition: str = "a100"
-    qos: str = "a100_mchoi"
-    # python: str = "/h/mchoi/projects/dl_lc/dl_lc_env/bin/python3.9"
+    partition: str = "a40"
+    qos: str = "m"
     time: int = 5
     mem: Optional[str] = None
     mem_per_gpu: str = "32G"
@@ -27,7 +26,8 @@ class SlurmJobResourceSpec:
 
 
 def make_test_registry(
-    registry_name, resource_spec: SlurmJobResourceSpec = None,
+    registry_name,
+    resource_spec: SlurmJobResourceSpec = None,
 ):
     global _MULTIGPU_TESTS_REGISTRY
     global _MULTIGPU_RESOURCE_SPECS

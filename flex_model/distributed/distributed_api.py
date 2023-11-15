@@ -23,8 +23,7 @@ backend is being used in the __init__method of the core `FlexModel` class.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import List, Optional, Type
+from typing import Optional, Type
 
 import accelerate
 import torch
@@ -70,13 +69,17 @@ def initialize_distributed_backend(
         and dp sizes.
     """
     assert (
-        world_size == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
+        world_size
+        == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
     )
     backend_cls = _parse_backend()
     logger.debug(f"Using DistributedBackend: {backend_cls.__name__}")
 
     device_mesh = GPUDeviceMesh.build(
-        world_size, tensor_parallel_size, pipeline_parallel_size, data_parallel_size,
+        world_size,
+        tensor_parallel_size,
+        pipeline_parallel_size,
+        data_parallel_size,
     )
 
     backend = backend_cls(device_mesh)
@@ -93,8 +96,7 @@ def distributed_backend_is_initialized() -> bool:
 
 
 def destroy_distributed_backend() -> None:
-    """Disable and delete the active distributed backend.
-    """
+    """Disable and delete the active distributed backend."""
     global _ACTIVE_BACKEND
     _ACTIVE_BACKEND = None
 
@@ -141,7 +143,9 @@ def _parse_backend() -> Type[DistributedBackend]:
 
     # Unsupported
     else:
-        raise NotImplementedError("Distributed backend currently not supported.")
+        raise NotImplementedError(
+            "Distributed backend currently not supported."
+        )
 
 
 def _expose_distributed_backend(backend: DistributedBackend):

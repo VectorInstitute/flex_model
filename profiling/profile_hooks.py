@@ -1,14 +1,8 @@
 import argparse
-import glob
 import os
 import pprint
-import random
-from collections import defaultdict
-from dataclasses import dataclass
 
-import numpy as np
 import torch
-import torch.nn as nn
 from torch.profiler import ProfilerActivity
 
 from flex_model.core import FlexModel
@@ -87,7 +81,7 @@ def validate_args(args):
     if args.model_dim is not None:
         args.model_dim_sweep = [args.model_dim]
     else:
-        args.model_dim_sweep = [2 ** i for i in range(9, 15)]
+        args.model_dim_sweep = [2**i for i in range(9, 15)]
 
     # Debug overrides both dtype and model dim to test all configurations.
     if args.debug:
@@ -97,7 +91,7 @@ def validate_args(args):
     # Determine which experiments to run.
     assert not (
         args.single_gpu_only and args.multi_gpu_only
-    ), f"Cannot have both single gpu and multi gpu only flags both True."
+    ), "Cannot have both single gpu and multi gpu only flags both True."
 
     # TP is across all gpus by default.
     if args.tp_size is None:
@@ -112,6 +106,7 @@ def validate_args(args):
         if not os.path.isdir(args.profile_dir):
             os.makedirs(args.profile_dir, exist_ok=True)
 
+    # Select a subset of experiments to run.
     args.exp_prefix = ""
     if args.single_gpu_only:
         args.exp_prefix = "single_gpu"
@@ -147,7 +142,9 @@ def main(args):
         os.makedirs(f"{args.profile_dir}/{exp.__name__}", exist_ok=True)
 
     num_steps = (
-        args.profile_wait_steps * args.profile_warmup_steps * args.profile_active_steps
+        args.profile_wait_steps
+        * args.profile_warmup_steps
+        * args.profile_active_steps
     )
 
     # Profiler setup.
@@ -172,7 +169,10 @@ def main(args):
 
             for exp in experiments:
                 exp_name = exp.__name__
-                if args.profile_force_exp and exp_name != args.profile_force_exp:
+                if (
+                    args.profile_force_exp
+                    and exp_name != args.profile_force_exp
+                ):
                     continue
 
                 if args.profile_save_profile:
@@ -184,7 +184,9 @@ def main(args):
 
                 # Setup network.
                 network = exp(
-                    model_dim=model_dim, n_layers=args.n_layers, config=spoof_config,
+                    model_dim=model_dim,
+                    n_layers=args.n_layers,
+                    config=spoof_config,
                 ).cuda()
 
                 # Run benchmark.
@@ -215,7 +217,8 @@ def main(args):
                     for sort_var in sort_variables:
                         print(
                             key_avgs.table(
-                                sort_by=sort_var, row_limit=args.profile_row_limit,
+                                sort_by=sort_var,
+                                row_limit=args.profile_row_limit,
                             )
                         )
 

@@ -1,14 +1,13 @@
 import logging
 from argparse import Namespace
 from functools import partial
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
 import flex_model.distributed as dist
-from flex_model.distributed.mappings import unity
 from flex_model.traverse import (
     InternalObject,
     LeafObject,
@@ -183,7 +182,8 @@ class HookFunction:
         }
 
     def _unpack_layer_outputs(
-        self, outputs: Union[LayerOutputs, Tensor],
+        self,
+        outputs: Union[LayerOutputs, Tensor],
     ) -> Tuple[Tensor, partial]:
         """Converts layer output object into an activation tensor and def.
 
@@ -218,7 +218,8 @@ class HookFunction:
         def _repack(_edited_tensor) -> LayerOutputs:
             """Pack activation tensor back into layer output container."""
             layer_outputs = unflatten(
-                treedef, left_leaves + [_edited_tensor] + right_leaves,
+                treedef,
+                left_leaves + [_edited_tensor] + right_leaves,
             )
             return layer_outputs
 
@@ -229,7 +230,6 @@ class HookFunction:
         using_torch_dist = torch.distributed.is_initialized
         using_act_dist = dist.activation_parallel_is_initialized
         in_pp_group = dist.in_pipeline_parallel_group
-        tp_world_size = dist.get_activation_tensor_parallel_world_size
 
         def _offload_tensor_to_cpu(activation: Tensor) -> None:
             assert self._shared_state.output_ptr is not None
@@ -283,14 +283,19 @@ class HookFunction:
 
         :param Tensor tensor: (Potentially sharded) activation tensor to parse.
         """
-        self._collect, self._disperse = dist.parse_collect_and_distribute_from_tensor(
-            tensor, self.expected_shape,
+        (
+            self._collect,
+            self._disperse,
+        ) = dist.parse_collect_and_distribute_from_tensor(
+            tensor,
+            self.expected_shape,
         )
         self._edit = self._concretize_editing_function()
         self._offload = self._concretize_offload_function()
 
     def _dispatch_hook_function(
-        self, hook_function_args: Tuple[Any, ...],
+        self,
+        hook_function_args: Tuple[Any, ...],
     ) -> Union[LayerOutputs, Tensor]:
         """Dispatches the correct handling function depending on the hook type.
 
@@ -336,14 +341,19 @@ class HookFunction:
         outputs = self._template_handle_layer_outputs(module, grad_inputs)
         return outputs
 
-    def _tensor_hook_impl(self, grad: Tensor,) -> Tensor:
+    def _tensor_hook_impl(
+        self,
+        grad: Tensor,
+    ) -> Tensor:
         """Runs a hook function for editing tensor gradients."""
         # No module since this is tensor-level.
         outputs = self._template_handle_tensor(None, grad)
         return outputs
 
     def _forward_pre_hook_impl(
-        self, module: nn.Module, args: Union[LayerOutputs, Tensor],
+        self,
+        module: nn.Module,
+        args: Union[LayerOutputs, Tensor],
     ) -> Union[LayerOutputs, Tensor]:
         """Runs a hook function for editing forward module inputs."""
         # Same procedure as `_handle_forward`, just that we operate on args.
@@ -351,13 +361,17 @@ class HookFunction:
         return outputs
 
     def _full_backward_pre_hook_impl(
-        self, module: nn.Module, grad_outputs: Union[LayerOutputs, Tensor],
+        self,
+        module: nn.Module,
+        grad_outputs: Union[LayerOutputs, Tensor],
     ) -> Union[LayerOutputs, Tensor]:
         """Runs a hook function for editing backward module output gradients."""
         outputs = self._template_layer_outputs(module, grad_outputs)
         return outputs
 
-    def _template_handle_tensor(self, module: nn.Module, tensor: Tensor) -> Tensor:
+    def _template_handle_tensor(
+        self, module: nn.Module, tensor: Tensor
+    ) -> Tensor:
         """Template function for editing a sharded activation tensor.
 
         This function is used alone in cases where hook functions operate
@@ -366,7 +380,12 @@ class HookFunction:
         start_shape = tensor.shape
 
         # Concretize functions.
-        fns_to_check = [self._collect, self._disperse, self._edit, self._offload]
+        fns_to_check = [
+            self._collect,
+            self._disperse,
+            self._edit,
+            self._offload,
+        ]
         fns_are_undefined = [fn is None for fn in fns_to_check]
         if all(fns_are_undefined):
             self._concretize_functions(tensor)
@@ -383,21 +402,26 @@ class HookFunction:
         self._offload(tensor)
 
         tensor = self._edit(
-            module, tensor, self._shared_state.save_ctx, self._shared_state.modules
+            module,
+            tensor,
+            self._shared_state.save_ctx,
+            self._shared_state.modules,
         )
 
         tensor = self._disperse(tensor)
 
         assert start_shape == tensor.shape, (
             f"Input tensor and output tensor shape mismatch: {start_shape} -> "
-            f"{end_shape}. The tensor returned by the editing function must "
+            f"{tensor.shape}. The tensor returned by the editing function must "
             f"not change in shape at the output."
         )
 
         return tensor
 
     def _template_handle_layer_outputs(
-        self, module: nn.Module, inputs_or_outputs: Union[LayerOutputs, Tensor],
+        self,
+        module: nn.Module,
+        inputs_or_outputs: Union[LayerOutputs, Tensor],
     ) -> Union[LayerOutputs, Tensor]:
         """Template function for editing layer input or output activation tensors.
 

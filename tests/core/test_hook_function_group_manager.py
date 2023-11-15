@@ -1,15 +1,15 @@
-import pytest
-
 from flex_model.core import HookFunction
 from flex_model.core.wrapper import _HookFunctionGroupManager
-from tests.fixtures import opt_350m_module_names
 
 
 def test_HookFunctionGroupManager_create(opt_350m_module_names):
     manager = _HookFunctionGroupManager()
 
     new_hook_fns = manager.create(
-        "new_group", "self_attn", (None, None, None), all_names=opt_350m_module_names,
+        "new_group",
+        "self_attn",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
     new_hook_fns = set(new_hook_fns)
 
@@ -28,12 +28,18 @@ def test_HookFunctionGroupManager_update_by_list(opt_350m_module_names):
     manager = _HookFunctionGroupManager()
 
     original_hf_group = manager.create(
-        "new_group", "self_attn", (None, None, None), all_names=opt_350m_module_names,
+        "new_group",
+        "self_attn",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
-    new_hf_group = [hf for hf in original_hf_group if "q_proj" in hf.module_name]
+    new_hf_group = [
+        hf for hf in original_hf_group if "q_proj" in hf.module_name
+    ]
 
     manager.update(
-        new_hf_group, group_name="q_proj",
+        new_hf_group,
+        group_name="q_proj",
     )
 
     assert "new_group" in manager.groups
@@ -59,7 +65,10 @@ def test_HookFunctionGroupManager_update_by_list(opt_350m_module_names):
 def test_HookFunctionGroupManager_update_by_hook_fn(opt_350m_module_names):
     manager = _HookFunctionGroupManager()
 
-    hook_function = HookFunction("model.decoder.layers.12", (None, None, None),)
+    hook_function = HookFunction(
+        "model.decoder.layers.12",
+        (None, None, None),
+    )
 
     manager.update(hook_function, group_name="new_group")
 
@@ -76,11 +85,15 @@ def test_HookFunctionGroupManager_update_by_string(opt_350m_module_names):
     manager = _HookFunctionGroupManager()
 
     new_hf_group = manager.create(
-        "new_group", "self_attn", (None, None, None), all_names=opt_350m_module_names,
+        "new_group",
+        "self_attn",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
 
     manager.update(
-        "k_proj", group_name="k_proj_group",
+        "k_proj",
+        group_name="k_proj_group",
     )
 
     assert "new_group" in manager.groups
@@ -102,10 +115,16 @@ def test_HookFunctionGroupManager_remove_by_list(opt_350m_module_names):
     manager = _HookFunctionGroupManager()
 
     new_hf_group = manager.create(
-        "new_group", "self_attn", (None, None, None), all_names=opt_350m_module_names,
+        "new_group",
+        "self_attn",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
-    other_hf_group = manager.create(
-        "other_group", "q_proj", (None, None, None), all_names=opt_350m_module_names,
+    _other_hf_group = manager.create(
+        "other_group",
+        "q_proj",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
 
     assert "new_group" in manager.groups
@@ -128,12 +147,18 @@ def test_HookFunctionGroupManager_remove_by_hook_fn(opt_350m_module_names):
     manager = _HookFunctionGroupManager()
 
     new_hf_group = manager.create(
-        "new_group", "self_attn", (None, None, None), all_names=opt_350m_module_names,
+        "new_group",
+        "self_attn",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
     hf_to_remove = new_hf_group[0]
 
-    other_hf_group = manager.create(
-        "other_group", "q_proj", (None, None, None), all_names=opt_350m_module_names,
+    _other_hf_group = manager.create(
+        "other_group",
+        "q_proj",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
 
     manager.remove(hf_to_remove, "new_group")
@@ -156,11 +181,17 @@ def test_HookFunctionGroupManager_remove_by_string(opt_350m_module_names):
     manager = _HookFunctionGroupManager()
 
     new_hf_group = manager.create(
-        "new_group", "self_attn", (None, None, None), all_names=opt_350m_module_names,
+        "new_group",
+        "self_attn",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
 
-    other_hf_group = manager.create(
-        "other_group", "q_proj", (None, None, None), all_names=opt_350m_module_names,
+    _other_hf_group = manager.create(
+        "other_group",
+        "q_proj",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
 
     assert "new_group" in manager.groups
@@ -184,12 +215,18 @@ def test_HookFunctionGroupManager_remove_by_string(opt_350m_module_names):
 def test_HookFunctionGroupManager_bisect(opt_350m_module_names):
     manager = _HookFunctionGroupManager()
 
-    new_hf_group = manager.create(
-        "new_group", "self_attn", (None, None, None), all_names=opt_350m_module_names,
+    _new_hf_group = manager.create(
+        "new_group",
+        "self_attn",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
 
     other_hf_group = manager.create(
-        "other_group", "fc1", (None, None, None), all_names=opt_350m_module_names,
+        "other_group",
+        "fc1",
+        (None, None, None),
+        all_names=opt_350m_module_names,
     )
 
     active, inactive = manager.bisect("new_group")

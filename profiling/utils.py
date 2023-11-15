@@ -1,9 +1,7 @@
 import argparse
-import contextlib
 import functools
 import os
 import random
-import time
 from collections import defaultdict
 from itertools import chain
 from typing import Callable, List
@@ -12,7 +10,6 @@ import megatron.core.parallel_state as mpu
 import numpy as np
 import torch
 import torch.nn as nn
-import wandb
 from megatron.core.parallel_state import (
     initialize_model_parallel as initialize_megatron_model_parallel,
 )
@@ -21,7 +18,6 @@ from megatron.core.tensor_parallel import (
     RowParallelLinear,
     model_parallel_cuda_manual_seed,
 )
-from torch.profiler import profile
 
 from flex_model.core import FlexModel, HookFunction
 
@@ -51,7 +47,10 @@ class TestNetwork(nn.Module):
                 chain.from_iterable(
                     (
                         ColumnParallelLinear(
-                            model_dim, model_dim, config=config, init_method=init_method
+                            model_dim,
+                            model_dim,
+                            config=config,
+                            init_method=init_method,
                         ),
                         RowParallelLinear(
                             model_dim,
@@ -118,12 +117,10 @@ def hook_function_gpu(self, inputs, outputs, acc, name):
 
 
 def hook_function_cpu_gather_scatter(self, inputs, outputs, acc, name):
-    """Hardcoded minimal hook function with gather/scatter.
-    """
+    """Hardcoded minimal hook function with gather/scatter."""
     rank = mpu.get_tensor_model_parallel_rank()
 
     _outputs = outputs[0] if isinstance(outputs, tuple) else outputs
-    original_shape = _outputs.shape
 
     def all_gather(tensor, dim=-1):
         output_list = [
@@ -131,28 +128,35 @@ def hook_function_cpu_gather_scatter(self, inputs, outputs, acc, name):
             for _ in range(mpu.get_tensor_model_parallel_world_size())
         ]
         torch.distributed.all_gather(
-            output_list, tensor, group=mpu.get_tensor_model_parallel_group(),
+            output_list,
+            tensor,
+            group=mpu.get_tensor_model_parallel_group(),
         )
         return torch.cat(output_list, dim=dim)
 
     def scatter(tensor, dim=-1):
         scatter_list = list(
-            torch.chunk(tensor, mpu.get_tensor_model_parallel_world_size(), dim=dim)
+            torch.chunk(
+                tensor, mpu.get_tensor_model_parallel_world_size(), dim=dim
+            )
         )
         return scatter_list[rank]
 
     # Determine correct gather/scatter functions.
+    def _no_op(x):
+        return x
+
     if isinstance(self, ColumnParallelLinear):
         gather_fn = all_gather
         scatter_fn = scatter
 
     elif isinstance(self, RowParallelLinear):
-        gather_fn = lambda x: x
-        scatter_fn = lambda x: x
+        gather_fn = _no_op
+        scatter_fn = _no_op
 
     elif isinstance(self, nn.Linear):
-        gather_fn = lambda x: x
-        scatter_fn = lambda x: x
+        gather_fn = _no_op
+        scatter_fn = _no_op
 
     else:
         raise NotImplementedError
@@ -181,7 +185,8 @@ class ExperimentNetworkManager:
         self.named_experiments = list(
             filter(
                 lambda attr: any(
-                    attr.startswith(prefix) for prefix in self.experiment_prefixes
+                    attr.startswith(prefix)
+                    for prefix in self.experiment_prefixes
                 ),
                 dir(self),
             )
@@ -192,7 +197,10 @@ class ExperimentNetworkManager:
 
     def get_experiment_handles(self, prefix: str) -> List[Callable]:
         experiments = list(
-            filter(lambda name: name.startswith(prefix), self.named_experiments,)
+            filter(
+                lambda name: name.startswith(prefix),
+                self.named_experiments,
+            )
         )
         experiment_handles = [getattr(self, e) for e in experiments]
         return experiment_handles
@@ -214,7 +222,10 @@ class ExperimentNetworkManager:
         if self.network_cache is None:
             return False
 
-        cached_args, cached_kwargs = self.network_cache[:-2], self.network_cache[-2]
+        cached_args, cached_kwargs = (
+            self.network_cache[:-2],
+            self.network_cache[-2],
+        )
         for arg, c_arg in zip(args, cached_args):
             if arg != c_arg:
                 return False
@@ -233,7 +244,9 @@ class ExperimentNetworkManager:
         return network
 
     def _hook_every_layer(self, network, hook_fn):
-        module_names_to_hook = set(f"layers.{i}" for i in range(len(network.layers)))
+        module_names_to_hook = set(
+            f"layers.{i}" for i in range(len(network.layers))
+        )
         for n, m in network.named_modules():
             if n in module_names_to_hook:
                 hook_fn = functools.partial(hook_fn, name=n)
@@ -314,11 +327,15 @@ class ExperimentNetworkManager:
 
         return network
 
-    def multi_gpu_cpu_hooks_with_gather_scatter(self, model_dim, n_layers, config):
+    def multi_gpu_cpu_hooks_with_gather_scatter(
+        self, model_dim, n_layers, config
+    ):
         network = self.make_network(
             model_dim, n_layers, is_distributed=True, config=config
         )
-        hook_fn = functools.partial(hook_function_cpu_gather_scatter, acc=self.cpu_acc)
+        hook_fn = functools.partial(
+            hook_function_cpu_gather_scatter, acc=self.cpu_acc
+        )
 
         self._hook_every_layer(network, hook_fn)
 
@@ -342,7 +359,10 @@ class ExperimentNetworkManager:
         )
         for n in module_names_to_hook:
             network.register_forward_hook(
-                HookFunction(module_name=n, expected_shape=(None, model_dim),)
+                HookFunction(
+                    module_name=n,
+                    expected_shape=(None, model_dim),
+                )
             )
         return network
 
