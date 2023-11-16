@@ -75,7 +75,7 @@ model = FlexModel(
     output_dict,
     tensor_parallel_size=1,
     pipeline_parallel_size=1,
-    data_parallel_size=4,		# For FSDP over 4 GPUs
+    data_parallel_size=4, # For FSDP over 4 GPUs
 )
 
 # Only need to provide a shape hint on the dimension which may be sharded
@@ -104,7 +104,7 @@ hook_function = HookFunction(
 )
 
 # Register the hook function into our model
-flex_model.register_forward_hook(hook_function)
+model.register_forward_hook(hook_function)
 
 # Run a forward pass, activations will be placed in the output_dict
 model.forward(inputs)
