@@ -4,8 +4,8 @@ import torch
 import torch.distributed as dist
 
 from flex_model.core import FlexModel, HookFunction
-from tests.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
-from tests.multi_gpu.testing_utils import FairscaleLayers, Utils
+from test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
+from test.multi_gpu.testing_utils import FairscaleLayers, Utils
 
 logger = logging.getLogger(__name__)
 

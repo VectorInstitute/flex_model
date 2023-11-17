@@ -3,6 +3,7 @@ https://download.pytorch.org/whl/cu118/torch-2.1.1%2Bcu118-cp39-cp39-linux_x86_6
 
 accelerate
 black
+coverage
 fairscale
 pre-commit
 sentencepiece

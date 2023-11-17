@@ -12,10 +12,10 @@ from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from transformers import LlamaForCausalLM
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
-import tests.multi_gpu.testing_utils as utils
 from flex_model.core import FlexModel, HookFunction
 import flex_model.distributed as fm_dist
-from tests.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
+import test.multi_gpu.testing_utils as utils
+from test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
 
 
 (

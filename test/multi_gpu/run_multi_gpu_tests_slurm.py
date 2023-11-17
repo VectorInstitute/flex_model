@@ -3,7 +3,7 @@ from dataclasses import asdict
 
 import submitit
 
-from tests.multi_gpu.registry import (
+from test.multi_gpu.registry import (
     SlurmJobResourceSpec,
     get_multigpu_resource_specs,
     get_multigpu_test_registry,

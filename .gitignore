@@ -29,3 +29,7 @@ docs/source/generated
 
 # Jupyter
 *.ipynb
+
+# Coverage
+.coverage
+coverage_html_report/

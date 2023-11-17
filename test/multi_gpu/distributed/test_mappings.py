@@ -3,8 +3,8 @@ import logging
 import torch
 
 import flex_model.distributed as fm_dist
-from tests.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
-from tests.multi_gpu.testing_utils import Utils
+from test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
+from test.multi_gpu.testing_utils import Utils
 
 logger = logging.getLogger(__name__)
 
