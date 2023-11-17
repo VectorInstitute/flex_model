@@ -14,8 +14,8 @@ from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
 from flex_model.core import FlexModel, HookFunction
 import flex_model.distributed as fm_dist
-import test.multi_gpu.testing_utils as utils
-from test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
+import _test.multi_gpu.testing_utils as utils
+from _test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
 
 
 (

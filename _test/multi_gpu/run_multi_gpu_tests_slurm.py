@@ -3,7 +3,7 @@ from dataclasses import asdict
 
 import submitit
 
-from test.multi_gpu.registry import (
+from _test.multi_gpu.registry import (
     SlurmJobResourceSpec,
     get_multigpu_resource_specs,
     get_multigpu_test_registry,
@@ -98,7 +98,7 @@ class MultiGPUSlurmJob:
 
 def main():
     # Import folders to register tests.
-    from tests.multi_gpu import core, distributed  # noqa: F401
+    from _test.multi_gpu import core, distributed  # noqa: F401
 
     test_registries = get_multigpu_test_registry()
 
