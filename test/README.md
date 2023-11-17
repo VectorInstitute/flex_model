@@ -4,9 +4,10 @@ require a single GPU to run. Tests which require multiple gpus to run (see
 `multi_gpu` folder) are run using `submitit` instead of `pytest`.
 
 # Test Coverage
-You can generate a report on code coverage by running:
+To generate code coverage reports, run the following command from the top-level
+`flex_model` directory (ie. `cd ..`).
 ```
-coverage run --source path/to/flex_model/tests/ -m pytest --ignore=multi_gpu
+coverage run -m pytest --ignore=tests/multi_gpu test/
 ```
 And you can read the coverage report by running:
 ```

@@ -3,7 +3,6 @@ branch = True
 source = 
     test
     flex_model
-omit = test/multi_gpu
 
 [report]
 ; Regexes for lines to exclude from consideration
