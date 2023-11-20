@@ -100,7 +100,6 @@ def test_hook_function(make_opt_350m, opt_tokenizer, offload_mode):
 
     my_hook_function = HookFunction(
         MODULE_NAME,
-        expected_shape=(None, None, None),
         editing_function=partial(editing_func, in_dict=activations),
     )
 

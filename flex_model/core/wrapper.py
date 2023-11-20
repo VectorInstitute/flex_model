@@ -66,8 +66,8 @@ class _HookFunctionGroupManager:
         self,
         group_name: str,
         group_constructor: str,
-        expected_shape: Tuple[Optional[int], ...],
         all_names: List[str],
+        expected_shape: Optional[Tuple[Optional[int], ...]] = None,
         editing_function: Optional[Callable] = None,
         unpack_idx: int = 0,
     ) -> List[HookFunction]:
@@ -570,7 +570,7 @@ class FlexModel(nn.Module):
         self,
         group_name: str,
         group_constructor: str,
-        expected_shape: Tuple[Optional[int], ...],
+        expected_shape: Optional[Tuple[Optional[int], ...]] = None,
         editing_function: Optional[Callable] = None,
         unpack_idx: Optional[int] = 0,
         hook_type: str = "forward",
@@ -598,8 +598,8 @@ class FlexModel(nn.Module):
         hook_fns = self._hook_fn_group_manager.create(
             group_name,
             group_constructor,
-            expected_shape,
             all_names,
+            expected_shape,
             editing_function,
             unpack_idx,
         )

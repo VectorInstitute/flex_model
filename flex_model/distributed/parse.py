@@ -43,7 +43,7 @@ def _get_different_dim(shape1: Tuple[int, ...], shape2: Tuple[int, ...]) -> int:
 
 
 def _autofill_expected_shape(
-    tensor: Tensor, expected_shape: Tuple[Optional[int], ...]
+    tensor: Tensor, expected_shape: Optional[Tuple[Optional[int], ...]]
 ) -> Tuple[int, ...]:
     """Complete the `None`-annotated tensor shape dimensions.
 
@@ -55,7 +55,7 @@ def _autofill_expected_shape(
 
     :param Tensor tensor: Local device tensor.
     :param expected_shape: Shape of the non-sharded tensor.
-    :type expected_shape: Tuple[Optional[int], ...]
+    :type expected_shape: Optional[Tuple[Optional[int], ...]]
 
     :returns: A tuple representing the filled-in expected shape with no `None`
         annotations.
@@ -65,9 +65,12 @@ def _autofill_expected_shape(
         local device tensor compared to the expected shape.
     """
     tensor_shape = tensor.shape
-    assert len(tensor_shape) == len(
-        expected_shape
-    ), f"Shape have different ndims: {len(tensor_shape)}, {len(expected_shape)}"
+    if expected_shape is not None:
+        assert (
+            len(tensor_shape) == len(expected_shape)
+        ), f"Shape have different ndims: {len(tensor_shape)}, {len(expected_shape)}"
+    else:
+        expected_shape = tuple(None for _ in range(len(tensor_shape)))
 
     # Expected shape contains None dimensions because it's annoying for the
     # user to know them exactly (ie. seq len after tokenization). Hence we will
@@ -83,7 +86,7 @@ def _autofill_expected_shape(
 
 def parse_collect_from_parameter_tensor(
     tensor: Tensor,
-    expected_shape: Tuple[Optional[int], ...],
+    expected_shape: Optional[Tuple[Optional[int], ...]],
 ) -> Callable:
     """Find the communication function which gathers the full parameter tensor.
 
@@ -94,7 +97,7 @@ def parse_collect_from_parameter_tensor(
 
     :param Tensor tensor: Local device parameter tensor.
     :param expected_shape: Shape of the non-sharded parameter tensor.
-    :type expected_shape: Tuple[Optional[int], ...]
+    :type expected_shape: Optional[Tuple[Optional[int], ...]]
 
     :returns: Collective communication function which assembles the full parameter
         tensor once called.
@@ -146,7 +149,7 @@ def parse_collect_from_parameter_tensor(
 
 def parse_collect_and_distribute_from_tensor(
     tensor: Tensor,
-    expected_shape: Tuple[Optional[int], ...],
+    expected_shape: Optional[Tuple[Optional[int], ...]],
 ) -> Tuple[Callable, Callable]:
     """Find the appropriate collect/disperse communication function.
 
@@ -156,7 +159,7 @@ def parse_collect_and_distribute_from_tensor(
 
     :param Tensor tensor: Local activation tensor
     :param expected_shape: Shape of the non-sharded activation tensor.
-    :type expected_shape: Tuple[Optional[int], ...]
+    :type expected_shape: Optional[Tuple[Optional[int], ...]]
 
     :returns: Collection and dispersion collective communication functions.
     :rtype: Tuple[Callable, Callable]

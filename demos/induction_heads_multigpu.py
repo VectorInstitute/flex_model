@@ -67,23 +67,26 @@ def setup_model(model_path: str) -> tuple[nn.Module, LlamaConfig]:
     config = LlamaConfig.from_pretrained(model_path)
     if LOCAL_RANK == 0:
         model = LlamaForCausalLM.from_pretrained(
-            model_path, torch_dtype=torch.bfloat16,
+            model_path,
+            torch_dtype=torch.bfloat16,
         )
     else:
         with torch.device("meta"):
             model = LlamaForCausalLM.from_pretrained(
-                model_path, torch_dtype=torch.bfloat16,
+                model_path,
+                torch_dtype=torch.bfloat16,
             )
     return model, config
 
 
-def fsdp_config() -> dict[str: Any]:
+def fsdp_config() -> dict[str:Any]:
     """Return the config to be used by FSDP.
 
     Returns:
     -------
         A dictionary containing keyword -> respective configuration.
     """
+
     def _module_init_fn(module: nn.Module) -> Callable:
         """Return the function used for initializing modules on FSDP workers."""
         return module.to_empty(
@@ -150,10 +153,13 @@ def calculate_induction_score(
     )
 
     for i, module_name in enumerate(module_names):
-
         # Retrieve the gathered activation maps for a given module
-        attn_maps = activation_dict[module_name][0].detach().to(
-            torch.cuda.current_device(),
+        attn_maps = (
+            activation_dict[module_name][0]
+            .detach()
+            .to(
+                torch.cuda.current_device(),
+            )
         )
 
         # Attention maps are of shape [batch, head, seq, seq]
@@ -166,13 +172,17 @@ def calculate_induction_score(
         # is 1-sequence_length tokens back). A better visualization can be
         # found on Anthropic's In-context Learning and Induction Heads paper
         induction_stripe = attn_maps.diagonal(
-            dim1=-2, dim2=-1, offset=1-sequence_length,
+            dim1=-2,
+            dim2=-1,
+            offset=1 - sequence_length,
         )
 
         # We average across the diagonal and the batch dims to get the final
         # induction scores
         induction_score = einops.reduce(
-            induction_stripe, "batch head_index position -> head_index", "mean",
+            induction_stripe,
+            "batch head_index position -> head_index",
+            "mean",
         )
         induction_score_store[i, :] = induction_score
 
@@ -197,9 +207,7 @@ def get_module_names(num_hidden_layers: int) -> list[str]:
     """
     prefix = "_fsdp_wrapped_module.model.layers."
     postfix = "._fsdp_wrapped_module.self_attn.dummy"
-    module_names = [
-        f"{prefix}{i}{postfix}" for i in range(num_hidden_layers)
-    ]
+    module_names = [f"{prefix}{i}{postfix}" for i in range(num_hidden_layers)]
     return module_names
 
 
@@ -219,7 +227,6 @@ def calculate_per_token_loss(
     # First take log softmax across the vocab dim to get log probabilities
     log_probs = F.log_softmax(logits, dim=-1)
 
-
     # log_probs[..., :-1, :] takes the log probs up to the final token while
     # keeping the shape the same.
 
@@ -232,12 +239,15 @@ def calculate_per_token_loss(
     # Finally, we need [..., 0] at the end so that we get rid of the extra
     # trailing rank we created (we also could've done a .squeeze())
     predicted_log_probs = -log_probs[..., :-1, :].gather(
-        dim=-1, index=prompt[..., 1:, None],
+        dim=-1,
+        index=prompt[..., 1:, None],
     )[..., 0]
 
     # Average loss across the batch dimension
     loss_by_position = einops.reduce(
-        predicted_log_probs, "batch position -> position", "mean",
+        predicted_log_probs,
+        "batch position -> position",
+        "mean",
     )
 
     plt.plot(
@@ -264,12 +274,13 @@ def main(args: Namespace) -> None:
     min_vocab_idx, max_vocab_idx = 500, 15000
 
     prompt = torch.randint(
-        min_vocab_idx,
-        max_vocab_idx,
-        (batch_size, seq_len)).to(torch.cuda.current_device(),
+        min_vocab_idx, max_vocab_idx, (batch_size, seq_len)
+    ).to(
+        torch.cuda.current_device(),
     )
     repeated_tokens = einops.repeat(
-        prompt, "batch seq_len -> batch (2 seq_len)",
+        prompt,
+        "batch seq_len -> batch (2 seq_len)",
     )
 
     model, config = setup_model(args.model_path)

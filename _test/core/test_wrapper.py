@@ -28,9 +28,7 @@ def test_register_forward_hook(make_opt_350m):
         activations,
     )
 
-    my_hook_function = HookFunction(
-        MODULE_NAME_1, expected_shape=(None, None, None)
-    )
+    my_hook_function = HookFunction(MODULE_NAME_1)
 
     model.register_forward_hook(my_hook_function)
 
@@ -53,10 +51,10 @@ def test_register_trainable_module(make_opt_350m):
     model = FlexModel(model, activations)
 
     my_hook_function_1 = HookFunction(
-        MODULE_NAME_1, expected_shape=(None, None, None)
+        MODULE_NAME_1,
     )
     my_hook_function_2 = HookFunction(
-        MODULE_NAME_2, expected_shape=(None, None, None)
+        MODULE_NAME_2,
     )
 
     model.register_forward_hook(my_hook_function_1)
@@ -67,6 +65,41 @@ def test_register_trainable_module(make_opt_350m):
     assert "test" in my_hook_function_2._shared_state.modules
     assert my_hook_function_1._shared_state.modules["test"] is trainable_module
     assert my_hook_function_2._shared_state.modules["test"] is trainable_module
+
+
+def test_trainable_module_gradient(make_opt_350m):
+    model = make_opt_350m().cuda()
+
+    activations = {}
+    fc = nn.Linear(1024, 1024, bias=False, dtype=model.dtype).cuda()
+    model = FlexModel(model, activations)
+
+    inputs = torch.randint(
+        low=0,
+        high=15000,
+        size=(4, 64),
+    ).cuda()
+
+    model.register_trainable_module("test", fc)
+
+    def _apply_test_fc(m, inputs, save_ctx, trainable_modules):
+        return trainable_modules["test"](inputs)
+
+    hook_func = HookFunction(
+        MODULE_NAME_1, expected_shape=None, editing_function=_apply_test_fc
+    )
+
+    model.register_forward_hook(hook_func)
+
+    outputs = model(inputs)
+    loss = outputs.logits.mean()
+    loss.backward()
+
+    for n, p in model.named_parameters():
+        assert p.grad is not None, f"Parameter: {n} has None grad field."
+        assert (
+            torch.count_nonzero(p.grad) != 0
+        ), f"Parameter: {n} has all-zero grad field."
 
 
 def test_destroy(make_opt_350m):
@@ -87,19 +120,18 @@ def test_destroy(make_opt_350m):
 
     my_hook_function = HookFunction(
         MODULE_NAME_1,
-        expected_shape=(None, None, None),
     )
 
     model.register_forward_hook(my_hook_function)
-    model = model.module  # Calls FlexModel.__exit__().
+    model = model.module  # Calls finalizer.
 
     assert not isinstance(model, FlexModel)
-    assert not getattr(model, "hook_functions", False)
-    assert not getattr(model, "_hook_function_handles", False)
-    assert not getattr(model, "_hooks_active", False)
-    assert not getattr(model, "output_ptr", False)
-    assert not getattr(model, "save_ctx", False)
-    assert not getattr(model, "trainable_modules", False)
+    assert not hasattr(model, "hook_functions")
+    assert not hasattr(model, "_hook_function_handles")
+    assert not hasattr(model, "_hooks_active")
+    assert not hasattr(model, "output_ptr")
+    assert not hasattr(model, "save_ctx")
+    assert not hasattr(model, "trainable_modules")
 
     hook_types = {"_forward", "_forward_pre", "_backward"}
     for m in model.modules():
@@ -143,13 +175,11 @@ def test_save_ctx(make_opt_350m, opt_tokenizer):
 
     retrieve_hook_fn = HookFunction(
         "model.decoder.layers.12",
-        (None, None, None),
-        retrieve_fn,
+        editing_function=retrieve_fn,
     )
     verify_hook_fn = HookFunction(
         "model.decoder.layers.18",
-        (None, None, None),
-        partial(verify_fn, act_dict=activations),
+        editing_function=partial(verify_fn, act_dict=activations),
     )
     model.register_forward_hook(retrieve_hook_fn)
     model.register_forward_hook(verify_hook_fn)
@@ -173,7 +203,7 @@ def test_FlexModel_group_all(make_opt_350m):
         f"model.decoder.layers.{i}"
         for i in range(len(model.module.model.decoder.layers))
     ]
-    hook_functions = [HookFunction(name, (None, None, None)) for name in layers]
+    hook_functions = [HookFunction(name) for name in layers]
     for hf in hook_functions:
         model.register_forward_hook(hf)
 
@@ -201,9 +231,8 @@ def test_FlexModel_group_creation(make_opt_350m, opt_tokenizer):
     # Run the model forward pass on a group, on the hook functions not in the
     # group, and on all hook functions.
     model.create_hook_group(
-        "new_group",
-        "self_attn",
-        (None, None, None),
+        group_name="new_group",
+        group_constructor="self_attn",
     )
 
     _ = model(inputs)

@@ -1,6 +1,6 @@
 import flex_model.distributed as fm_dist
-from test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
-from test.multi_gpu.testing_utils import Utils
+from _test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
+from _test.multi_gpu.testing_utils import Utils
 
 register_initialize_test, get_initialize_test = make_test_registry(
     "initialize",

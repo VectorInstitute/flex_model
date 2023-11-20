@@ -77,7 +77,7 @@ class HookFunction:
     :var expected_shape: Shape of the full activation tensor. Only the
         dimensions which are sharded need to be provided. Other dimensions
         can be annotated as :code:`None` and will be auto-completed.
-    :type expected_shape: Tuple[Optional[int], ...]
+    :type expected_shape: Optional[Tuple[Optional[int], ...]]
     :var editing_function: Function which is run on the full activation tensor
         and returns some edited function. Global contexts like the
         save context and trainable modules are available for use in the
@@ -128,7 +128,7 @@ class HookFunction:
     def __init__(
         self,
         module_name: str,
-        expected_shape: Tuple[Optional[int], ...],
+        expected_shape: Optional[Tuple[Optional[int], ...]] = None,
         editing_function: Optional[Callable] = None,
         unpack_idx: int = 0,
     ) -> None:
@@ -137,7 +137,7 @@ class HookFunction:
         :param str module_name: Name of the :code:`nn.Module` submodule to hook
             into.
         :param expected_shape: Shape of the full activation tensor.
-        :type expected_shape: Tuple[Optional[int], ...]
+        :type expected_shape: Optional[Tuple[Optional[int], ...]]
         :param editing_function: Function which edits the activation
             tensor.
         :type editing_function: Optional[Callable]
