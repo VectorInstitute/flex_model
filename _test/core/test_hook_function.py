@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 
 from flex_model.core import FlexModel, HookFunction
-from flex_model.utils import setup_logger
 
 
 # could be any MLP layer and the code won't break. The test doesn't generalize
@@ -13,6 +12,7 @@ from flex_model.utils import setup_logger
 MODULE_NAME = "model.decoder.layers.9.fc2"
 
 
+# For getting submodule by name.
 def rgetattr(module, attr):
     def _getattr(module, attr):
         return getattr(module, attr)
@@ -25,8 +25,6 @@ def test_hook_function(make_opt_350m, opt_tokenizer):
     """
     Tests if HookFunction implements a forward hook correctly
     """
-    setup_logger("debug")
-
     model = make_opt_350m().cuda().eval()
     tokenizer = opt_tokenizer
 
