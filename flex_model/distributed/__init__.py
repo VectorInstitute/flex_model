@@ -1,23 +1,16 @@
-from .backends import GPUDeviceMesh, TorchDistributedBackend
-from .distributed_api import (
-    activation_parallel_is_initialized,
-    destroy_activation_parallel,
-    destroy_distributed_backend,
-    distributed_backend_is_initialized,
-    get_activation_data_parallel_group,
-    get_activation_data_parallel_rank,
-    get_activation_data_parallel_world_size,
-    get_activation_pipeline_parallel_group,
-    get_activation_pipeline_parallel_rank,
-    get_activation_pipeline_parallel_world_size,
-    get_activation_tensor_parallel_group,
-    get_activation_tensor_parallel_rank,
-    get_activation_tensor_parallel_world_size,
-    in_data_parallel_group,
-    in_pipeline_parallel_group,
-    in_tensor_parallel_group,
-    initialize_activation_parallel,
-    initialize_distributed_backend,
+from .distributed_state import (
+    initialize_distributed_state,
+    distributed_state_is_initialized,
+    destroy_distributed_state,
+    get_data_parallel_group,
+    get_data_parallel_rank,
+    get_data_parallel_world_size,
+    get_pipeline_parallel_group,
+    get_pipeline_parallel_rank,
+    get_pipeline_parallel_world_size,
+    get_tensor_parallel_group,
+    get_tensor_parallel_rank,
+    get_tensor_parallel_world_size,
 )
 from .mappings import (
     all_gather_data_parallel,
@@ -30,7 +23,15 @@ from .mappings import (
     scatter_tensor_parallel,
     unity,
 )
-from .parse import (
-    parse_collect_and_distribute_from_tensor,
-    parse_collect_from_parameter_tensor,
+from .strategies import (
+    BaseRoutingStrategy,
+    ParameterTensorParallelRoutingStrategy,
+    ActivationTensorAllToAllRoutingStrategy,
+    BaseOffloadStrategy,
+    NullMemoryOffloadStrategy,
+    CPUPinnedMemoryOffloadStrategy,
+    CPUPagedMemoryOffloadStrategy,
+    GPUMemoryOffloadStrategy,
+    BaseFunctionStrategy,
+    NonValidatedFunctionStrategy,
 )

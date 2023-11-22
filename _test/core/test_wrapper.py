@@ -35,7 +35,6 @@ def test_register_forward_hook(make_opt_350m):
     assert my_hook_function._shared_state.output_ptr is activations
     assert my_hook_function._shared_state.save_ctx is model.save_ctx
     assert my_hook_function._shared_state.modules is model.trainable_modules
-    assert my_hook_function._shared_state.offload_mode == "CPU"
 
 
 def test_register_trainable_module(make_opt_350m):

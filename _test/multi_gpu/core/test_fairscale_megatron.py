@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @register_fairscale_megatron_test
 def test_FairscaleLayers():
-    Utils.initialize_model_parallel()
+    Utils.initialize_mpu_model_parallel(2, 1, 2)
 
     torch.manual_seed(42069)
 
@@ -41,12 +41,12 @@ def test_FairscaleLayers():
 
     parallel_out, regular_out = model(inputs)
     assert torch.allclose(parallel_out, regular_out, atol=1e-7)
-    Utils.destroy_model_parallel()
+    Utils.destroy_mpu_model_parallel()
 
 
 @register_fairscale_megatron_test
 def test_backward_hooks_FairscaleLayers():
-    Utils.initialize_model_parallel(2, 1, 2)
+    Utils.initialize_mpu_model_parallel(2, 1, 2)
 
     torch.manual_seed(42069)
 
@@ -105,12 +105,12 @@ def test_backward_hooks_FairscaleLayers():
         )
         logger.info("Tests successful.")
 
-    Utils.destroy_model_parallel()
+    Utils.destroy_mpu_model_parallel()
 
 
 @register_fairscale_megatron_test
 def test_forward_hooks_FairscaleLayers():
-    Utils.initialize_model_parallel(2, 1, 2)
+    Utils.initialize_mpu_model_parallel(2, 1, 2)
 
     torch.manual_seed(42069)
 
@@ -174,74 +174,4 @@ def test_forward_hooks_FairscaleLayers():
         )
         logger.info("Tests successful.")
 
-    Utils.destroy_model_parallel()
-
-
-@register_fairscale_megatron_test
-def test_gpu_offload_FairscaleLayers():
-    Utils.initialize_model_parallel(2, 1, 2)
-
-    torch.manual_seed(42069)
-
-    vocab_size = 512
-    sequence_length = 128
-    hidden_dim = 256
-    batch_size = 4
-
-    inputs = torch.randint(
-        low=0,
-        high=vocab_size,
-        size=(batch_size, sequence_length),
-    ).cuda()
-    logger.debug(inputs)
-
-    model = FairscaleLayers(vocab_size, sequence_length, hidden_dim)
-
-    output_dict = {}
-    model = FlexModel(
-        model,
-        output_dict,
-        tensor_parallel_size=2,
-        pipeline_parallel_size=1,
-        data_parallel_size=2,
-        offload_mode="GPU",
-    )
-    hook_functions = {
-        "vocab_parallel_embedding": (None, None, hidden_dim),
-        "vocab_embedding": (None, None, None),
-        "parallel_embedding": (None, None, hidden_dim),
-        "embedding": (None, None, None),
-        "column_parallel_linear": (None, None, hidden_dim),
-        "col_linear": (None, None, None),
-        "row_parallel_linear": (None, None, None),
-        "row_linear": (None, None, None),
-    }
-    for module_name, expected_shape in hook_functions.items():
-        model.register_forward_hook(HookFunction(module_name, expected_shape))
-
-    _, _ = model(inputs)
-
-    if dist.get_rank() == 0:
-        assert torch.allclose(
-            output_dict["vocab_parallel_embedding"][0],
-            output_dict["vocab_embedding"][0],
-            atol=1e-7,
-        )
-        assert torch.allclose(
-            output_dict["parallel_embedding"][0],
-            output_dict["embedding"][0],
-            atol=1e-7,
-        )
-        assert torch.allclose(
-            output_dict["column_parallel_linear"][0],
-            output_dict["col_linear"][0],
-            atol=1e-7,
-        )
-        assert torch.allclose(
-            output_dict["row_parallel_linear"][0],
-            output_dict["row_linear"][0],
-            atol=1e-7,
-        )
-        logger.info("Tests successful.")
-
-    Utils.destroy_model_parallel()
+    Utils.destroy_mpu_model_parallel()

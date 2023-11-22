@@ -13,7 +13,6 @@ from transformers import LlamaForCausalLM
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
 from flex_model.core import FlexModel, HookFunction
-import flex_model.distributed as fm_dist
 import _test.multi_gpu.testing_utils as utils
 from _test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
 
@@ -231,13 +230,13 @@ def test_fsdp_llama():
     }
 
     # Shut-down the distributed processes
+    del flex_model  # Run finalizer which destroys distributed state.
     if dist.get_rank() != 0:
         return
-    fm_dist.destroy_activation_parallel()
-    fm_dist.destroy_distributed_backend()
     dist.destroy_process_group()
 
     # Single-gpu
+    dist.init_process_group("nccl", world_size=1, rank=0)
     all_single_gpu_activations = {}
     single_gpu_activations = {}
     model = make_llama2().cuda()

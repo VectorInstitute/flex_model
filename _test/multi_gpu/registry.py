@@ -9,8 +9,8 @@ _MULTIGPU_RESOURCE_SPECS = None
 class SlurmJobResourceSpec:
     """Resource specification for a single slurm job."""
 
-    partition: str = "a40"
-    qos: str = "m"
+    partition: str = "a100"
+    qos: str = "a100_mchoi"
     time: int = 5
     mem: Optional[str] = None
     mem_per_gpu: str = "32G"
