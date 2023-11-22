@@ -45,30 +45,32 @@ def llama_tokenizer() -> LlamaTokenizer:
 
 class Utils:
     @staticmethod
-    def initialize_distributed():
-        dist.init_process_group(backend="nccl")
-
-        # Set current device for future calls to `.cuda()`.
+    def initialize_torch_distributed():
+        dist.init_process_group("nccl")
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         torch.cuda.set_device(local_rank)
 
-        print(
-            f"Rank{dist.get_rank()}/{dist.get_world_size()}: "
-            f"Distributed initialized"
+    @staticmethod
+    def initialize_flexmodel_distributed(
+        tp: int = 1,
+        pp: int = 1,
+        dp: int = 1,
+    ):
+        fm_dist.initialize_distributed_state(
+            tp * pp * dp,
+            tp,
+            pp,
+            dp,
         )
 
     @staticmethod
-    def destroy_distributed():
-        dist.destroy_process_group()
-
-    @staticmethod
-    def initialize_model_parallel(
+    def initialize_mpu_model_parallel(
         tp: int = 1,
         pp: int = 1,
         dp: int = 1,
     ):
         if not dist.is_initialized():
-            Utils.initialize_distributed()
+            Utils.initialize_torch_distributed()
 
         mpu.initialize_model_parallel(
             model_parallel_size_=tp,
@@ -76,35 +78,16 @@ class Utils:
         )
 
     @staticmethod
-    def destroy_model_parallel():
+    def destroy_torch_distributed():
+        dist.destroy_process_group()
+
+    @staticmethod
+    def destroy_flexmodel_distributed():
+        fm_dist.destroy_distributed_state()
+
+    @staticmethod
+    def destroy_mpu_model_parallel():
         mpu.destroy_model_parallel()
-        dist.barrier()
-
-    @staticmethod
-    def initialize_distributed_backend(
-        tp: int = 1,
-        pp: int = 1,
-        dp: int = 1,
-    ):
-        if not dist.is_initialized():
-            Utils.initialize_distributed()
-        fm_dist.initialize_distributed_backend(
-            dist.get_world_size(), tp, pp, dp
-        )
-
-    @staticmethod
-    def destroy_distributed_backend():
-        fm_dist.destroy_distributed_backend()
-        dist.barrier()
-
-    @staticmethod
-    def initialize_activation_parallel():
-        fm_dist.initialize_activation_parallel()
-
-    @staticmethod
-    def destroy_activation_parallel():
-        fm_dist.destroy_activation_parallel()
-        dist.barrier()
 
 
 def gather_weight(param: Tensor, dim: int):

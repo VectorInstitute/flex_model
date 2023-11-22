@@ -44,7 +44,6 @@ class _SharedState:
     output_ptr: Dict[str, List[Tensor]]
     save_ctx: Namespace
     modules: nn.ModuleDict
-    offload_mode: str
 
 
 class _HookFunctionGroupManager:
@@ -240,10 +239,8 @@ def _finalize_dangling_state(
     hook_functions.clear()
 
     # Clear distributed states.
-    if dist.distributed_backend_is_initialized():
-        if dist.activation_parallel_is_initialized():
-            dist.destroy_activation_parallel()
-        dist.destroy_distributed_backend()
+    if dist.distributed_state_is_initialized():
+        dist.destroy_distributed_state()
 
 
 class FlexModel(nn.Module):
@@ -279,8 +276,6 @@ class FlexModel(nn.Module):
     :var int tp_size: Tensor parallel dimension size.
     :var int pp_size: Pipeline parallel dimension size.
     :var int dp_size: Data parallel dimension size.
-    :var int offload_mode: Selected device which activation tensors are
-        offloaded to.
 
     :note: Calls to `.backward()` should consider calling :code:`wrapped_module_requires_grad(False)`,
         else the gradient will be generated for the entire wrapped model and
@@ -333,7 +328,6 @@ class FlexModel(nn.Module):
         tensor_parallel_size: int = 1,
         pipeline_parallel_size: int = 1,
         data_parallel_size: int = 1,
-        offload_mode: str = "CPU",
     ):
         """Initialize the instance by wrapping the Pytorch module.
 
@@ -346,8 +340,6 @@ class FlexModel(nn.Module):
             parallel group.
         :param int data_parallel_size: Number of processes in each data
             parallel group.
-        :param str offload_mode: Device which activation tensors are offloaded
-            to. Valid modes are currently "CPU" and "GPU".
         """
         super().__init__()
         self.module = module
@@ -360,26 +352,16 @@ class FlexModel(nn.Module):
         self.dp_size = data_parallel_size
 
         # Initialize FM distributed.
-        if torch.distributed.is_initialized():
-            world_size = self.tp_size * self.pp_size * self.dp_size
-            dist.initialize_distributed_backend(
-                world_size,
-                self.tp_size,
-                self.pp_size,
-                self.dp_size,
-            )
-            dist.initialize_activation_parallel()
-
-        self._offload_modes = {"CPU", "GPU"}
-        assert offload_mode in self._offload_modes
-        self.offload_mode = offload_mode
+        world_size = self.tp_size * self.pp_size * self.dp_size
+        dist.initialize_distributed_state(
+            world_size, self.tp_size, self.pp_size, self.dp_size
+        )
 
         # Create shared state between FM instance and HF instances.
         self._shared_state = _SharedState(
             self.output_ptr,
             self.save_ctx,
             self.trainable_modules,
-            self.offload_mode,
         )
         self._hook_fn_group_manager = _HookFunctionGroupManager()
 
@@ -396,6 +378,11 @@ class FlexModel(nn.Module):
             Union[nn.Module, Tensor],
             Dict[HookFunction, torch.utils.hooks.RemovableHandle],
         ] = defaultdict(dict)
+
+        # Strategy for parameter gathering.
+        self._param_routing_strategy = (
+            dist.ParameterTensorParallelRoutingStrategy
+        )
 
         # Setup finalizer for cleanup.
         self._finalizer = weakref.finalize(
@@ -421,17 +408,15 @@ class FlexModel(nn.Module):
 
     def _flush_pipeline(self) -> None:
         """Gather tensors from all pipeline stages to the first stage."""
-        if (
-            torch.distributed.is_initialized()
-            and dist.in_pipeline_parallel_group()
-            and dist.get_activation_pipeline_parallel_world_size() > 1
-        ):
+        pp_rank = dist.get_pipeline_parallel_rank()
+        pp_world_size = dist.get_pipeline_parallel_world_size()
+        if pp_rank == 0 and pp_world_size > 1:
             gathered_acts = dist.gather_pipeline_parallel_tensor_dicts(
                 self.output_ptr
             )
 
             # Rank 0 accumulates the activation tensors.
-            if dist.get_activation_pipeline_parallel_rank() == 0:
+            if pp_rank == 0:
                 self.output_ptr.update(gathered_acts)
 
             # Other ranks reset their collections for the next forward pass.
@@ -686,11 +671,13 @@ class FlexModel(nn.Module):
             )
 
         local_param = self.module.get_parameter(parameter_name).detach()
-        collect_fn = dist.parse_collect_from_parameter_tensor(
+        self._param_routing_strategy.initialize(
             local_param,
             expected_shape,
         )
-        full_param = collect_fn(local_param).cpu()
+
+        full_param = self._param_routing_strategy.execute_prologue(local_param)
+
         return full_param
 
     @property

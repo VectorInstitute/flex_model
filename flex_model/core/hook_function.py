@@ -3,7 +3,6 @@ from argparse import Namespace
 from functools import partial
 from typing import Any, Callable, Optional, Tuple, Union
 
-import torch
 import torch.nn as nn
 from torch import Tensor
 
@@ -18,20 +17,6 @@ from flex_model.traverse import (
 
 LayerOutputs = Union[InternalObject, LeafObject, ScalarObject]
 logger = logging.getLogger(__name__)
-
-
-def _parse_editing_function(edit_function: Callable) -> Callable:
-    """Parse the user-provided editing function.
-
-    :note: This is the default parser for editing functions.
-
-    :param Callable edit_function: User-defined editing function.
-
-    :returns: Parsed editing function.
-    :rtype: Callable
-    """
-    # TODO: parse if needed.
-    return edit_function
 
 
 def default_editing_function(
@@ -162,15 +147,15 @@ class HookFunction:
             self.editing_function = editing_function
         self.unpack_idx = unpack_idx
 
-        # FM instance registry-provided state.
+        # FM instance registry-provided state and other runtime state.
         self._shared_state = None
         self._hook_type = None
+        self.module = None  # Safe to cache this state, never changes.
 
-        # Runtime state.
-        self._collect: Optional[Callable] = None
-        self._disperse: Optional[Callable] = None
-        self._edit: Optional[Callable] = None
-        self._offload: Optional[Callable] = None
+        # Default strategies, initialized once at first runtime.
+        self.routing_strategy = dist.ActivationTensorAllToAllRoutingStrategy
+        self.offload_strategy = dist.CPUPinnedMemoryOffloadStrategy
+        self.function_strategy = dist.NonValidatedFunctionStrategy
 
         # Valid hook function implementations.
         self.hook_type_to_impl_fn = {
@@ -180,6 +165,98 @@ class HookFunction:
             "forward_pre": self._forward_pre_hook_impl,
             "full_backward_pre": self._full_backward_pre_hook_impl,
         }
+
+    def _forward_hook_impl(
+        self,
+        module: nn.Module,
+        _inputs: Union[LayerOutputs, Tensor],
+        outputs: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Runs a hook function for editing forward module outputs."""
+        if self.module is None:
+            self.module = module
+        outputs = self._peel_and_apply(outputs)
+        return outputs
+
+    def _full_backward_hook_impl(
+        self,
+        module: nn.Module,
+        grad_inputs: Union[LayerOutputs, Tensor],
+        _grad_outputs: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Runs a hook function for editing backward module input gradients."""
+        if self.module is None:
+            self.module = module
+        outputs = self._peel_and_apply(grad_inputs)
+        return outputs
+
+    def _tensor_hook_impl(
+        self,
+        grad: Tensor,
+    ) -> Tensor:
+        """Runs a hook function for editing tensor gradients."""
+        # No module since this is tensor-level.
+        outputs = self._apply(grad)
+        return outputs
+
+    def _forward_pre_hook_impl(
+        self,
+        module: nn.Module,
+        args: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Runs a hook function for editing forward module inputs."""
+        if self.module is None:
+            self.module = module
+        outputs = self._peel_and_apply(args)
+        return outputs
+
+    def _full_backward_pre_hook_impl(
+        self,
+        module: nn.Module,
+        grad_outputs: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Runs a hook function for editing backward module output gradients."""
+        if self.module is None:
+            self.module = module
+        outputs = self._peel_and_apply(grad_outputs)
+        return outputs
+
+    def _apply(self, tensor: Tensor) -> Tensor:
+        """Template function for editing a sharded activation tensor.
+
+        This function is used alone in cases where hook functions operate
+        directly on a tensor, and not an entire module.
+        """
+        if not isinstance(self.routing_strategy, dist.BaseRoutingStrategy):
+            self.routing_strategy = self.routing_strategy.initialize(
+                tensor, self.expected_shape
+            )
+            self.offload_strategy = self.offload_strategy.initialize(
+                self.module_name, self._shared_state.output_ptr
+            )
+            self.function_strategy = self.function_strategy.initialize(
+                self.editing_function
+            )
+
+        start_shape = tensor.shape
+        tensor = self.routing_strategy.execute_prologue(tensor)
+        self.offload_strategy.execute(tensor)
+        tensor = self.function_strategy.execute(
+            self.module,
+            tensor,
+            self._shared_state.save_ctx,
+            self._shared_state.modules,
+        )
+        tensor = self.routing_strategy.execute_epilogue(tensor)
+        end_shape = tensor.shape
+
+        assert start_shape == end_shape, (
+            f"Input tensor and output tensor shape mismatch: {start_shape} -> "
+            f"{end_shape}. The tensor returned by the editing function must "
+            f"not change in shape at the output."
+        )
+
+        return tensor
 
     def _unpack_layer_outputs(
         self,
@@ -225,73 +302,30 @@ class HookFunction:
 
         return tensor, _repack
 
-    def _concretize_offload_function(self):
-        # Safe, these don't change dring runtime.
-        using_torch_dist = torch.distributed.is_initialized
-        using_act_dist = dist.activation_parallel_is_initialized
-        in_pp_group = dist.in_pipeline_parallel_group
+    def _peel_and_apply(
+        self,
+        inputs_or_outputs: Union[LayerOutputs, Tensor],
+    ) -> Union[LayerOutputs, Tensor]:
+        """Template function for editing layer input or output activation tensors.
 
-        def _offload_tensor_to_cpu(activation: Tensor) -> None:
-            assert self._shared_state.output_ptr is not None
+        Given arbitary layer outputs, this function does unpacking of layer
+        outputs and repacking of the potentially edited layer outputs.
 
-            if not using_torch_dist() or (using_act_dist() and in_pp_group()):
-                # Tensor.to() with non_blockin=True operates on shared memory
-                # buffers automatically.
-                if self._shared_state.output_ptr.get(self.module_name, False):
-                    self._shared_state.output_ptr[self.module_name].append(
-                        activation.detach().to("cpu", non_blocking=True)
-                    )
-                else:
-                    self._shared_state.output_ptr[self.module_name] = [
-                        activation.detach().to("cpu", non_blocking=True)
-                    ]
+        :param nn.Module module: Module which was hooked into.
+        :param inputs_or_outputs: Layer inputs or outputs, depending on if
+            it's hooked into a backward or forward hook respectively.
+        :type inputs_or_outputs: Union[LayerOutputs, Tensor]
 
-        def _offload_tensor_to_gpu(activation: Tensor) -> None:
-            assert self._shared_state.output_ptr is not None
-
-            if not using_torch_dist() or (using_act_dist() and in_pp_group()):
-                if self._shared_state.output_ptr.get(self.module_name, False):
-                    self._shared_state.output_ptr[self.module_name].append(
-                        activation.detach().clone()
-                    )
-                else:
-                    self._shared_state.output_ptr[self.module_name] = [
-                        activation.detach().clone()
-                    ]
-
-        # Valid offload modes.
-        mode_to_fn = {
-            "CPU": _offload_tensor_to_cpu,
-            "GPU": _offload_tensor_to_gpu,
-        }
-
-        return mode_to_fn[self._shared_state.offload_mode]
-
-    def _concretize_editing_function(self):
-        base_edit_fn = _parse_editing_function(self.editing_function)
-
-        return base_edit_fn
-
-    def _concretize_functions(self, tensor: Tensor) -> None:
-        """Runs parsers for collection/dispersion, editing and dumping.
-
-        Populates the :code:`_collect`, :code:`_disperse`, :code:`_edit` and
-        :code:`_dump` functions during runtime. The results of which depend on:
-            1. The distributed device mesh
-            2. The shape of the (potentially sharded) activation tensor
-            3. The expected shape of the full activation tensor.
-
-        :param Tensor tensor: (Potentially sharded) activation tensor to parse.
+        :returns: The edited layer outputs.
+        :rtype: Union[LayerOutputs, Tensor]
         """
-        (
-            self._collect,
-            self._disperse,
-        ) = dist.parse_collect_and_distribute_from_tensor(
-            tensor,
-            self.expected_shape,
-        )
-        self._edit = self._concretize_editing_function()
-        self._offload = self._concretize_offload_function()
+        tensor, repack_fn = self._unpack_layer_outputs(inputs_or_outputs)
+
+        tensor = self._apply(tensor)
+
+        edited_inputs_or_outputs = repack_fn(tensor)
+
+        return edited_inputs_or_outputs
 
     def _dispatch_hook_function(
         self,
@@ -320,133 +354,6 @@ class HookFunction:
         retval = handle_fn(*hook_function_args)
 
         return retval
-
-    def _forward_hook_impl(
-        self,
-        module: nn.Module,
-        _inputs: Union[LayerOutputs, Tensor],
-        outputs: Union[LayerOutputs, Tensor],
-    ) -> Union[LayerOutputs, Tensor]:
-        """Runs a hook function for editing forward module outputs."""
-        outputs = self._template_handle_layer_outputs(module, outputs)
-        return outputs
-
-    def _full_backward_hook_impl(
-        self,
-        module: nn.Module,
-        grad_inputs: Union[LayerOutputs, Tensor],
-        _grad_outputs: Union[LayerOutputs, Tensor],
-    ) -> Union[LayerOutputs, Tensor]:
-        """Runs a hook function for editing backward module input gradients."""
-        outputs = self._template_handle_layer_outputs(module, grad_inputs)
-        return outputs
-
-    def _tensor_hook_impl(
-        self,
-        grad: Tensor,
-    ) -> Tensor:
-        """Runs a hook function for editing tensor gradients."""
-        # No module since this is tensor-level.
-        outputs = self._template_handle_tensor(None, grad)
-        return outputs
-
-    def _forward_pre_hook_impl(
-        self,
-        module: nn.Module,
-        args: Union[LayerOutputs, Tensor],
-    ) -> Union[LayerOutputs, Tensor]:
-        """Runs a hook function for editing forward module inputs."""
-        # Same procedure as `_handle_forward`, just that we operate on args.
-        outputs = self._template_layer_outputs(module, args)
-        return outputs
-
-    def _full_backward_pre_hook_impl(
-        self,
-        module: nn.Module,
-        grad_outputs: Union[LayerOutputs, Tensor],
-    ) -> Union[LayerOutputs, Tensor]:
-        """Runs a hook function for editing backward module output gradients."""
-        outputs = self._template_layer_outputs(module, grad_outputs)
-        return outputs
-
-    def _template_handle_tensor(
-        self, module: nn.Module, tensor: Tensor
-    ) -> Tensor:
-        """Template function for editing a sharded activation tensor.
-
-        This function is used alone in cases where hook functions operate
-        directly on a tensor, and not an entire module.
-        """
-        start_shape = tensor.shape
-
-        # Concretize functions.
-        fns_to_check = [
-            self._collect,
-            self._disperse,
-            self._edit,
-            self._offload,
-        ]
-        fns_are_undefined = [fn is None for fn in fns_to_check]
-        if all(fns_are_undefined):
-            self._concretize_functions(tensor)
-        elif not all(fns_are_undefined):
-            pass
-        else:
-            raise Exception(
-                "HookFunction runtime functions are only partially defined. "
-                "Crashing since HookFunction may be corrupted."
-            )
-
-        tensor = self._collect(tensor)
-
-        self._offload(tensor)
-
-        tensor = self._edit(
-            module,
-            tensor,
-            self._shared_state.save_ctx,
-            self._shared_state.modules,
-        )
-
-        tensor = self._disperse(tensor)
-
-        assert start_shape == tensor.shape, (
-            f"Input tensor and output tensor shape mismatch: {start_shape} -> "
-            f"{tensor.shape}. The tensor returned by the editing function must "
-            f"not change in shape at the output."
-        )
-
-        return tensor
-
-    def _template_handle_layer_outputs(
-        self,
-        module: nn.Module,
-        inputs_or_outputs: Union[LayerOutputs, Tensor],
-    ) -> Union[LayerOutputs, Tensor]:
-        """Template function for editing layer input or output activation tensors.
-
-        Given arbitary layer outputs, this function does unpacking of layer
-        outputs and repacking of the potentially edited layer outputs.
-
-        :param nn.Module module: Module which was hooked into.
-        :param inputs_or_outputs: Layer inputs or outputs, depending on if
-            it's hooked into a backward or forward hook respectively.
-        :type inputs_or_outputs: Union[LayerOutputs, Tensor]
-
-        :returns: The edited layer outputs.
-        :rtype: Union[LayerOutputs, Tensor]
-        """
-        # Separate local activation tensor from rest of layer outputs.
-        tensor, repack_fn = self._unpack_layer_outputs(inputs_or_outputs)
-
-        # Run editing logic on activation tensor.
-        tensor = self._template_handle_tensor(module, tensor)
-
-        # Repack the local activation tensor back into the rest of the layer
-        # outputs.
-        edited_inputs_or_outputs = repack_fn(tensor)
-
-        return edited_inputs_or_outputs
 
     def __call__(self, *args, **kwargs) -> LayerOutputs:
         """Entrypoint called by Pytorch hook logic.

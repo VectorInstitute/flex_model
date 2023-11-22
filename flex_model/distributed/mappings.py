@@ -4,9 +4,13 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 from torch import Tensor
 
-import flex_model.distributed as dist
+import flex_model.distributed as fm_dist
 
 logger = logging.getLogger(__name__)
+
+
+def _log_shape(fn_name, in_shape, out_shape):
+    logger.debug(f"{fn_name}\t|\tInput:\t{in_shape} -> {out_shape}")
 
 
 def unity(tensor: Tensor) -> Tensor:
@@ -17,7 +21,8 @@ def unity(tensor: Tensor) -> Tensor:
     :returns: Input tensor unmodified.
     :rtype: Tensor
     """
-    logger.debug(f"Unity | IN:   {tensor.shape}")
+    _log_shape("unity", tensor.shape, tensor.shape)
+
     return tensor
 
 
@@ -29,10 +34,12 @@ def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
     :returns: All tensor parallel ranks will get the same tensor.
     :rtype: Tensor
     """
-    tp_world_size = dist.get_activation_tensor_parallel_world_size()
-    tp_group = dist.get_activation_tensor_parallel_group()
+    in_shape = tensor.shape
+    tp_world_size = fm_dist.get_tensor_parallel_world_size()
+    tp_group = fm_dist.get_tensor_parallel_group()
 
     if tp_world_size == 1:
+        _log_shape("broadcast_tensor_parallel", in_shape, tensor.shape)
         return tensor
 
     # We only interact among tensor parallel group to bcast
@@ -43,7 +50,8 @@ def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
         async_op=False,
     )
 
-    logger.debug(f"Broadcast | IN: {tensor.shape}")
+    _log_shape("broadcast_tensor_parallel", in_shape, tensor.shape)
+
     return tensor
 
 
@@ -55,13 +63,12 @@ def broadcast_data_parallel(tensor: Tensor) -> Tensor:
     :returns: All data parallel ranks will get the same tensor.
     :rtype: Tensor
     """
-    if not dist.in_data_parallel_group():
-        return tensor
-
-    dp_world_size = dist.get_activation_data_parallel_world_size()
-    dp_group = dist.get_activation_data_parallel_group()
+    in_shape = tensor.shape
+    dp_world_size = fm_dist.get_data_parallel_world_size()
+    dp_group = fm_dist.get_data_parallel_group()
 
     if dp_world_size == 1:
+        _log_shape("broadcast_data_parallel", in_shape, tensor.shape)
         return tensor
 
     # We only interact among tensor parallel group to bcast
@@ -72,7 +79,8 @@ def broadcast_data_parallel(tensor: Tensor) -> Tensor:
         async_op=False,
     )
 
-    logger.debug(f"Broadcast | IN: {tensor.shape}")
+    _log_shape("broadcast_data_parallel", in_shape, tensor.shape)
+
     return tensor
 
 
@@ -91,11 +99,13 @@ def all_gather_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
     :returns: The gathered and concatenated tensor.
     :rtype: Tensor
     """
-    tp_world_size = dist.get_activation_tensor_parallel_world_size()
-    tp_rank = dist.get_activation_tensor_parallel_rank()
-    tp_group = dist.get_activation_tensor_parallel_group()
+    in_shape = tensor.shape
+    tp_world_size = fm_dist.get_tensor_parallel_world_size()
+    tp_rank = fm_dist.get_tensor_parallel_rank()
+    tp_group = fm_dist.get_tensor_parallel_group()
 
     if tp_world_size == 1:
+        _log_shape("all_gather_tensor_parallel", in_shape, tensor.shape)
         return tensor
 
     tensor_list = [torch.empty_like(tensor) for _ in range(tp_world_size)]
@@ -110,7 +120,8 @@ def all_gather_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
 
     output_tensor = torch.cat(tensor_list, dim=dim)
 
-    logger.debug(f"Allgather | IN: {tensor.shape} -> {output_tensor.shape}")
+    _log_shape("all_gather_tensor_parallel", in_shape, output_tensor.shape)
+
     return output_tensor
 
 
@@ -129,14 +140,14 @@ def all_gather_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
     :returns: The gathered and concatenated tensor.
     :rtype: Tensor
     """
-    if not dist.in_data_parallel_group():
-        return tensor
+    in_shape = tensor.shape
 
-    dp_world_size = dist.get_activation_data_parallel_world_size()
-    dp_rank = dist.get_activation_data_parallel_rank()
-    dp_group = dist.get_activation_data_parallel_group()
+    dp_world_size = fm_dist.get_data_parallel_world_size()
+    dp_rank = fm_dist.get_data_parallel_rank()
+    dp_group = fm_dist.get_data_parallel_group()
 
     if dp_world_size == 1:
+        _log_shape("all_gather_data_parallel", in_shape, tensor.shape)
         return tensor
 
     tensor_list = [torch.empty_like(tensor) for _ in range(dp_world_size)]
@@ -151,14 +162,15 @@ def all_gather_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
 
     output_tensor = torch.cat(tensor_list, dim=dim)
 
-    logger.debug(f"Allgather | IN: {tensor.shape} -> {output_tensor.shape}")
+    _log_shape("all_gather_data_parallel", in_shape, output_tensor.shape)
+
     return output_tensor
 
 
 def _all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
     """Unused."""
-    tp_world_size = dist.get_activation_tensor_parallel_world_size()
-    tp_group = dist.get_activation_tensor_parallel_group()
+    tp_world_size = fm_dist.get_tensor_parallel_world_size()
+    tp_group = fm_dist.get_tensor_parallel_group()
 
     if tp_world_size == 1:
         return tensor
@@ -190,16 +202,19 @@ def scatter_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
     :returns: The corresponding chunk of the full tensor.
     :rtype: Tensor
     """
-    tp_world_size = dist.get_activation_tensor_parallel_world_size()
-    tp_rank = dist.get_activation_tensor_parallel_rank()
+    in_shape = tensor.shape
+    tp_world_size = fm_dist.get_tensor_parallel_world_size()
+    tp_rank = fm_dist.get_tensor_parallel_rank()
 
     if tp_world_size == 1:
+        _log_shape("scatter_tensor_parallel", in_shape, tensor.shape)
         return tensor
 
     input_list = torch.chunk(tensor, tp_world_size, dim=dim)
     output_tensor = input_list[tp_rank].contiguous()
 
-    logger.debug(f"Scatter | IN: {tensor.shape} -> {output_tensor.shape}")
+    _log_shape("scatter_tensor_parallel", in_shape, output_tensor.shape)
+
     return output_tensor
 
 
@@ -219,19 +234,19 @@ def scatter_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
     :returns: The corresponding chunk of the full tensor.
     :rtype: Tensor
     """
-    if not dist.in_data_parallel_group():
-        return tensor
-
-    dp_world_size = dist.get_activation_data_parallel_world_size()
-    dp_rank = dist.get_activation_data_parallel_rank()
+    in_shape = tensor.shape
+    dp_world_size = fm_dist.get_data_parallel_world_size()
+    dp_rank = fm_dist.get_data_parallel_rank()
 
     if dp_world_size == 1:
+        _log_shape("scatter_data_parallel", in_shape, tensor.shape)
         return tensor
 
     input_list = torch.chunk(tensor, dp_world_size, dim=dim)
     output_tensor = input_list[dp_rank].contiguous()
 
-    logger.debug(f"Scatter | IN: {tensor.shape} -> {output_tensor.shape}")
+    _log_shape("scatter_data_parallel", in_shape, output_tensor.shape)
+
     return output_tensor
 
 
@@ -288,7 +303,7 @@ def _make_flat_buffer(
     tensor_buffer = torch.cat(tensors)
 
     meta: _TBUF_META = {
-        "buffer_rank": dist.get_activation_pipeline_parallel_rank(),
+        "buffer_rank": fm_dist.get_pipeline_parallel_rank(),
         "buffer_size": tensor_buffer.numel(),
         "buffer_dtype": tensor_buffer.dtype,
         "name_to_index_map": name_to_index_map,
@@ -302,7 +317,7 @@ def _gather_pipeline_parallel(
     tbuf_groups: Dict[torch.dtype, Optional[Tensor]],
     all_metadata_groups: List[Optional[Dict[torch.dtype, _TBUF_META]]],
 ) -> Dict[str, Tensor]:
-    rank = dist.get_activation_pipeline_parallel_rank()
+    rank = fm_dist.get_pipeline_parallel_rank()
 
     # Setup collections for communication
     def _empty_groups() -> Dict[torch.dtype, List[Union[Tensor, int]]]:
@@ -435,8 +450,8 @@ def batch_isend_irecv_pipeline_parallel(
     :param List[Tensor] send_tensors: Tensors to send.
     :param List[int] send_to_ranks: Ranks to send to.
     """
-    rank = dist.get_activation_pipeline_parallel_rank()
-    group = dist.get_activation_pipeline_parallel_group()
+    rank = fm_dist.get_pipeline_parallel_rank()
+    group = fm_dist.get_pipeline_parallel_group()
 
     assert len(recv_tensors) == len(recv_from_ranks), (
         f"Mistmatch in recv tensors({len(recv_tensors)}) and "
@@ -505,12 +520,13 @@ def gather_pipeline_parallel_tensor_dicts(
     :returns: A collection of the objects sent from all pipeline paralel group ranks.
     :rtype: Dict[str, Tensor]
     """
-    if not dist.in_pipeline_parallel_group():
-        return tensor_dict
+    in_shapes = []
+    for tensor in tensor_dict.values():
+        in_shapes.append(tensor.shape)
 
-    world_size = dist.get_activation_pipeline_parallel_world_size()
-    rank = dist.get_activation_pipeline_parallel_rank()
-    group = dist.get_activation_pipeline_parallel_group()
+    world_size = fm_dist.get_pipeline_parallel_world_size()
+    rank = fm_dist.get_pipeline_parallel_rank()
+    group = fm_dist.get_pipeline_parallel_group()
 
     tensor_dict_groups = _group_by_dtype(tensor_dict)
 
@@ -538,5 +554,10 @@ def gather_pipeline_parallel_tensor_dicts(
     output_tensor_dict = _gather_pipeline_parallel(
         tbuf_groups, all_metadata_groups
     )
+
+    for in_shape, out_tensor in zip(in_shapes, output_tensor_dict.values()):
+        _log_shape(
+            "gather_pipeline_parallel_tensor_dicts", in_shape, out_tensor.shape
+        )
 
     return output_tensor_dict
