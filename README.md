@@ -110,16 +110,61 @@ model.register_forward_hook(hook_function)
 model.forward(inputs)
 ```
 
+# `HookFunction` Groups
+`HookFunction`s can be associated with group tags. Using these tags, you can
+choose which groups are run during a given forward pass. There are two primary
+ways of interacting with `HookFunction` groups:
+1. `FlexModel.create_hook_group`: This function creates a collection of uniform
+`HookFunction` instances, and tags them under the same group name. Let's
+inspect the function signature:
+```
+def create_hook_group(
+    self,
+    group_name: str,
+    group_constructor: str,
+    expected_shape: Optional[Tuple[Optional[int], ...]] = None,
+    editing_function: Optional[Callable] = None,
+    unpack_idx: Optional[int] = 0,
+```
+    - `group_name`: Name of the group to tag the created `HookFunctions` under.
+    - `group_constructor`: String pattern which is used to match against
+    submodule names. For example, setting this to "self_attn" will match any
+    submodule with "self_attn" `in` its name. If 10 submodules match this, then
+    10 `HookFunction` instances will be created and registered on its respective
+    submodule.
+    - `expected_shape`, `editing_function` and `unpack_idx` will all be the
+    same for each `HookFunction` created.
+2. `FlexModel.update_hook_groups`: This function updates the group tags for
+existing `HookFunction` instances already registered. It takes either a list of
+`HookFunction`s to tag, a single `HookFunction` to tag, or a string to pattern-
+match against submodules to automatically tag any associated `HookFunction`s.
+
+## Enabling/Disabling Certain Groups
+Note that `HookFunction` groups follow `set` semantics. When running forward passes, all
+`HookFunction`s are enabled by default (ie. all `HookFunction`s are members of
+the `all` group). Specifying the groups to run as a list of strings in the
+models's forward function will enable the union set of `HookFunction`s withing
+the groups. You can also enable the `complement` argument, which will enable
+all hooks **not** in the union set.
+
+## Adding/Removing Group Tags
+Each `HookFunction` instance can be tagged in as many groups as you'd like.
+`HookFunction`s can also be removed from groups via `remove_hook_groups` with
+similar semantics to the `update_hook_groups` method.
+
+Note that you **cannot** remove the `all` group tag from any `HookFunction`
+instance, which will cause an exception.
+
 
 # Running Tests
-Running single-gpu tests in the `tests/` folder using `pytest` can be done with
+Running single-gpu tests from the project folder using `pytest` can be done with
 the command:
 ```
-pytest --ignore=multi_gpu
+torchrun --nnodes 1 --nproc_per_node -m pytest --ignore=_test/multi_gpu _test/
 ```
 
 Multi-gpu tests are run via `submitit` on a `slurm` cluster. Navigate to
-`tests/multi_gpu` and run the command:
+`_test/multi_gpu` and run the command:
 ```
 python run_multi_gpu_tests_slurm.py
 ```
