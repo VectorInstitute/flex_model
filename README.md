@@ -117,7 +117,7 @@ ways of interacting with `HookFunction` groups:
 1. `FlexModel.create_hook_group`: This function creates a collection of uniform
 `HookFunction` instances, and tags them under the same group name. Let's
 inspect the function signature:
-```
+```python
 def create_hook_group(
     self,
     group_name: str,
@@ -126,14 +126,15 @@ def create_hook_group(
     editing_function: Optional[Callable] = None,
     unpack_idx: Optional[int] = 0,
 ```
-    - `group_name`: Name of the group to tag the created `HookFunctions` under.
-    - `group_constructor`: String pattern which is used to match against
-    submodule names. For example, setting this to "self_attn" will match any
-    submodule with "self_attn" `in` its name. If 10 submodules match this, then
-    10 `HookFunction` instances will be created and registered on its respective
-    submodule.
-    - `expected_shape`, `editing_function` and `unpack_idx` will all be the
-    same for each `HookFunction` created.
+
+- `group_name`: Name of the group to tag the created `HookFunctions` under.
+- `group_constructor`: String pattern which is used to match against
+submodule names. For example, setting this to "self_attn" will match any
+submodule with "self_attn" `in` its name. If 10 submodules match this, then
+10 `HookFunction` instances will be created and registered on its respective
+submodule.
+- `expected_shape`, `editing_function` and `unpack_idx` will all be the
+same for each `HookFunction` created.
 2. `FlexModel.update_hook_groups`: This function updates the group tags for
 existing `HookFunction` instances already registered. It takes either a list of
 `HookFunction`s to tag, a single `HookFunction` to tag, or a string to pattern-
