@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
+from flex_model.core import FlexModel, HookFunction
 from torch import nn
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -28,16 +29,13 @@ from transformers import (
 )
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
-from flex_model.core import FlexModel, HookFunction
-
-LOCAL_RANK = None
-
 
 def setup() -> None:
     """Instantiate process group."""
     dist.init_process_group("nccl")
-    global LOCAL_RANK
-    LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    torch.cuda.set_device(local_rank)
+    return local_rank
 
 
 def cleanup() -> None:
@@ -53,19 +51,21 @@ def args() -> Namespace:
     return parser.parse_args()
 
 
-def setup_model(model_path: str) -> tuple[nn.Module, LlamaConfig]:
+def setup_model(model_path: str, local_rank: int) -> \
+    tuple[nn.Module, LlamaConfig]:
     """Instantiate model, tokenizer, and config.
 
     Args:
     ----
         model_path: A path to the model being instantiated
+        local_rank: The local rank of the worker
 
     Returns:
     -------
         A tuple of length two containing the model and the config.
     """
     config = LlamaConfig.from_pretrained(model_path)
-    if LOCAL_RANK == 0:
+    if local_rank == 0:
         model = LlamaForCausalLM.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16,
@@ -79,8 +79,12 @@ def setup_model(model_path: str) -> tuple[nn.Module, LlamaConfig]:
     return model, config
 
 
-def fsdp_config() -> dict[str:Any]:
+def fsdp_config(local_rank: int) -> dict[str:Any]:
     """Return the config to be used by FSDP.
+
+    Args:
+    ----
+        local_rank: The local rank of the worker
 
     Returns:
     -------
@@ -103,7 +107,7 @@ def fsdp_config() -> dict[str:Any]:
     sharding_strategy = ShardingStrategy.FULL_SHARD
     device_id = torch.cuda.current_device()
     sync_module_states = True
-    param_init_fn = _module_init_fn if LOCAL_RANK != 0 else None
+    param_init_fn = _module_init_fn if local_rank != 0 else None
     mp_policy = MixedPrecision(
         param_dtype=torch.bfloat16,
         buffer_dtype=torch.bfloat16,
@@ -267,14 +271,14 @@ def main(args: Namespace) -> None:
     ----
         args: Command-line arguments
     """
-    torch.cuda.set_device(LOCAL_RANK)
+    local_rank = setup()
 
     seq_len = args.seq_length
     batch_size = 4
     min_vocab_idx, max_vocab_idx = 500, 15000
 
     prompt = torch.randint(
-        min_vocab_idx, max_vocab_idx, (batch_size, seq_len)
+        min_vocab_idx, max_vocab_idx, (batch_size, seq_len),
     ).to(
         torch.cuda.current_device(),
     )
@@ -283,8 +287,8 @@ def main(args: Namespace) -> None:
         "batch seq_len -> batch (2 seq_len)",
     )
 
-    model, config = setup_model(args.model_path)
-    fsdp_cfg = fsdp_config()
+    model, config = setup_model(args.model_path, local_rank)
+    fsdp_cfg = fsdp_config(local_rank)
 
     model = FSDP(
         model,
@@ -325,10 +329,9 @@ def main(args: Namespace) -> None:
         # Note: we are only calculating this over the main rank's output
         # for the purpose of demonstration
         calculate_per_token_loss(out, repeated_tokens)
+    cleanup()
 
 
 if __name__ == "__main__":
     parsed_args = args()
-    setup()
     main(parsed_args)
-    cleanup()
