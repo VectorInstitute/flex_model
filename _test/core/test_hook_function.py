@@ -1,8 +1,6 @@
-from argparse import Namespace
 from functools import reduce
 
 import torch
-import torch.nn as nn
 
 from flex_model.core import FlexModel, HookFunction
 
@@ -20,62 +18,191 @@ def rgetattr(module, attr):
     return reduce(_getattr, [module] + attr.split("."))
 
 
-# Call fixture twice.
-def test_hook_function(make_opt_350m, opt_tokenizer):
-    """
-    Tests if HookFunction implements a forward hook correctly
-    """
-    model = make_opt_350m().cuda().eval()
-    tokenizer = opt_tokenizer
+def test_forward_hooks(make_opt_350m):
+    model = make_opt_350m().eval().cuda()
 
-    prompts = [
-        "It's a nice day we're having",
-        "The capital of Canada is",
-        "What should I eat for dinner tonight?",
-        "There's about three people going to",
-    ]
+    inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
 
-    inputs = tokenizer(
-        prompts,
-        padding=True,
-        return_tensors="pt",
-    )["input_ids"].cuda()
+    acc = {}
 
-    activations = {}
-
-    # Regular hook fn impl.
-    def regular_hook_fn(module, inputs, outputs):
-        activations["regular"] = outputs.detach().cpu()
+    # Test pytorch hook.
+    def hook_fn(module, inputs, outputs):
+        acc["torch"] = outputs.detach().cpu()
         return outputs * 2
 
-    submodule = rgetattr(model, MODULE_NAME)
-    handle = submodule.register_forward_hook(regular_hook_fn)
-
-    gt_out = model(inputs).logits
+    submodule_to_hook = rgetattr(model, MODULE_NAME)
+    handle = submodule_to_hook.register_forward_hook(hook_fn)
+    gt_retval = model(inputs).logits
 
     handle.remove()
 
-    # FlexModel impl.
-    model = FlexModel(model, activations)
-
-    def editing_func(
-        module,
-        outputs,
-        save_ctx: Namespace,
-        trainable_modules: nn.ModuleDict,
-    ) -> torch.Tensor:
+    # Test flexmodel hook.
+    def editing_fn(module, outputs, save_ctx, trainable_modules):
         return outputs * 2
 
-    my_hook_function = HookFunction(
-        MODULE_NAME,
-        expected_shape=None,
-        editing_function=editing_func,
+    flexmodel = FlexModel(model, acc)
+    flexmodel.register_forward_hook(
+        HookFunction(MODULE_NAME, editing_function=editing_fn)
     )
-    model.register_forward_hook(my_hook_function)
+    fm_retval = flexmodel(inputs).logits
 
-    fm_out = model(inputs).logits
+    torch.testing.assert_close(gt_retval, fm_retval)
+    torch.testing.assert_close(acc["torch"], acc[MODULE_NAME][0])
 
-    assert torch.allclose(gt_out, fm_out)
 
-    assert torch.allclose(activations["regular"], activations[MODULE_NAME][0])
-    assert activations[MODULE_NAME][0].device.type == "cpu"
+def test_full_backward_hooks(make_opt_350m):
+    inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
+
+    acc = {}
+
+    # Test pytorch hook.
+    gt_grad_model = make_opt_350m().cuda()
+
+    def hook_fn(module, grad_inputs, grad_outputs):
+        acc["torch"] = grad_inputs[0].detach().cpu()
+        grad_inputs = (grad_inputs[0] * 2, *grad_inputs[1:])
+        return grad_inputs
+
+    submodule_to_hook = rgetattr(gt_grad_model, MODULE_NAME)
+    handle = submodule_to_hook.register_full_backward_hook(hook_fn)
+    gt_retval = gt_grad_model(inputs).logits
+    gt_retval.mean().backward()
+
+    handle.remove()
+
+    # Test flexmodel hook.
+    fm_grad_model = make_opt_350m().cuda()
+
+    def editing_fn(module, grad_inputs, save_ctx, trainable_modules):
+        return grad_inputs * 2
+
+    flexmodel = FlexModel(fm_grad_model, acc)
+    flexmodel.register_full_backward_hook(
+        HookFunction(MODULE_NAME, editing_function=editing_fn)
+    )
+    fm_retval = flexmodel(inputs).logits
+    fm_retval.mean().backward()
+
+    torch.testing.assert_close(gt_retval, fm_retval)
+    torch.testing.assert_close(acc["torch"], acc[MODULE_NAME][0])
+    for (gt_name, gt_grad), (fm_name, fm_grad) in zip(
+        gt_grad_model.named_parameters(), fm_grad_model.named_parameters()
+    ):
+        assert gt_name == fm_name
+        torch.testing.assert_close(gt_grad, fm_grad)
+
+
+def test_tensor_hooks(make_opt_350m):
+    inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
+
+    acc = {}
+
+    # Test pytorch hook.
+    gt_grad_model = make_opt_350m().cuda()
+
+    def hook_fn(grad):
+        acc["torch"] = grad.detach().cpu()
+        return grad
+
+    submodule_to_hook = rgetattr(gt_grad_model, f"{MODULE_NAME}.weight")
+    handle = submodule_to_hook.register_hook(hook_fn)
+    gt_retval = gt_grad_model(inputs).logits
+    gt_retval.mean().backward()
+
+    handle.remove()
+
+    # Test flexmodel hook.
+    fm_grad_model = make_opt_350m().cuda()
+
+    def editing_fn(module, grad, save_ctx, trainable_modules):
+        return grad * 2
+
+    flexmodel = FlexModel(fm_grad_model, acc)
+    flexmodel.register_hook(
+        HookFunction(f"{MODULE_NAME}.weight", editing_function=editing_fn)
+    )
+    fm_retval = flexmodel(inputs).logits
+    fm_retval.mean().backward()
+
+    torch.testing.assert_close(gt_retval, fm_retval)
+    torch.testing.assert_close(acc["torch"], acc[f"{MODULE_NAME}.weight"][0])
+    for (gt_name, gt_grad), (fm_name, fm_grad) in zip(
+        gt_grad_model.named_parameters(), fm_grad_model.named_parameters()
+    ):
+        assert gt_name == fm_name
+        torch.testing.assert_close(gt_grad, fm_grad)
+
+
+def test_forward_pre_hooks(make_opt_350m):
+    model = make_opt_350m().eval().cuda()
+
+    inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
+
+    acc = {}
+
+    # Test pytorch hook.
+    def hook_fn(module, inputs_):
+        acc["torch"] = inputs_[0].detach().cpu()
+        inputs_ = (inputs_[0] * 2, *inputs_[1:])
+        return inputs_
+
+    submodule_to_hook = rgetattr(model, MODULE_NAME)
+    handle = submodule_to_hook.register_forward_pre_hook(hook_fn)
+    gt_retval = model(inputs).logits
+
+    handle.remove()
+
+    # Test flexmodel hook.
+    def editing_fn(module, inputs_, save_ctx, trainable_modules):
+        return inputs_ * 2
+
+    flexmodel = FlexModel(model, acc)
+    flexmodel.register_forward_pre_hook(
+        HookFunction(MODULE_NAME, editing_function=editing_fn)
+    )
+    fm_retval = flexmodel(inputs).logits
+
+    torch.testing.assert_close(gt_retval, fm_retval)
+    torch.testing.assert_close(acc["torch"], acc[MODULE_NAME][0])
+
+
+def test_full_backward_pre_hooks(make_opt_350m):
+    inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
+
+    acc = {}
+
+    # Test pytorch hook.
+    gt_grad_model = make_opt_350m().cuda()
+
+    def hook_fn(module, grad_outputs):
+        acc["torch"] = grad_outputs[0].detach().cpu()
+        grad_outputs = (grad_outputs[0] * 2, *grad_outputs[1:])
+        return grad_outputs
+
+    submodule_to_hook = rgetattr(gt_grad_model, MODULE_NAME)
+    handle = submodule_to_hook.register_full_backward_pre_hook(hook_fn)
+    gt_retval = gt_grad_model(inputs).logits
+    gt_retval.mean().backward()
+
+    handle.remove()
+
+    # Test flexmodel hook.
+    fm_grad_model = make_opt_350m().cuda()
+
+    def editing_fn(module, grad_outputs, save_ctx, trainable_modules):
+        return grad_outputs * 2
+
+    flexmodel = FlexModel(fm_grad_model, acc)
+    flexmodel.register_full_backward_pre_hook(
+        HookFunction(MODULE_NAME, editing_function=editing_fn)
+    )
+    fm_retval = flexmodel(inputs).logits
+    fm_retval.mean().backward()
+
+    torch.testing.assert_close(gt_retval, fm_retval)
+    torch.testing.assert_close(acc["torch"], acc[MODULE_NAME][0])
+    for (gt_name, gt_grad), (fm_name, fm_grad) in zip(
+        gt_grad_model.named_parameters(), fm_grad_model.named_parameters()
+    ):
+        assert gt_name == fm_name
+        torch.testing.assert_close(gt_grad, fm_grad)

@@ -1,6 +1,18 @@
 # FlexModel
 [![Documentation Status](https://readthedocs.org/projects/flexmodel/badge/?version=latest)](https://flexmodel.readthedocs.io/en/latest/)
 
+## Current WIPs
+* Adding more rigorous tess for hook function behaviours
+* Implement strategies for hanlding distributed `save_ctx` and `trainable_modules`
+* Visualizations of model architecture showing where hooks can be placed
+* Visualizations of model architecture showing where hooks are currently
+located, and what groups they are tagged in
+* Editing function presets
+* Distributed debugging tools and user-provided editing function parsing
+* Remove the need to pass an `expected_shape`
+
+## Introduction
+
 `FlexModel` is a tool designed for distributed interpretability of Large
 Language Models (LLMs). `FlexModel` allows you to retrieve and/or edit
 **unsharded** activations within your LLM (among other things).
@@ -39,19 +51,21 @@ so your activations are always unsharded. For example, `FlexModel` integrates
 simply with distributed frameworks like DDP, FSDP, Fairscale Megatron and
 Megatron-LM.
 
+## What can I hook?
+You can attach hooks to anything which native PyTorch would allow you to
+hook into! `FlexModel` simply intercepts the `nn.Module` hook function
+registration API to inject our own logic. Concretely, we support the following
+hook function registration functions:
+* `nn.Module.register_forward_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_forward_hook)
+* `nn.Module.register_full_backward_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook)
+* `torch.Tensor.register_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.Tensor.register_hook.html#torch-tensor-register-hook)
+* `nn.Module.register_forward_pre_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_forward_pre_hook)
+* `nn.Module.register_full_backward_pre_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_pre_hook)
+
 
 # Installation
-Run `pip install -e .` from the root directory. PyPi package coming soon!
-
-
-# Important Notes
-- Make sure to replace any instances of `module.forward(inputs)` with
-`module(inputs)`. The forward hooks are not run by PyTorch if you directly call
-the forward function of a module (this is the case with LLaMA).
-- If you would like to create `HookFunction` entrypoints arbitrarily in the
-wrapped model, you can place `DummyModule`s with identity forward functions
-which can be hooked into. `DummyModule` is located in the `core/core_utils.py`
-file.
+Run `pip install -e .` from the root directory. PyPi package coming soon with
+full release before Neurips 2023!
 
 
 # Usage
@@ -60,10 +74,11 @@ classes. When using distributed models using FSDP or Megatron layers, the
 `FlexModel` class requires specification of data parallel (DP), tensor parallel
 (TP), and pipeline parallel (PP) sizes.
 ```python
+from torch.distributed.fsdp import FullyShardedDataParallel
 from flex_model import FlexModel, HookFunction
 
 # Load some model
-model = ...
+model = FSDP(model, ...)
 inputs = ...
 
 # Activations will be dumped here
@@ -110,6 +125,7 @@ model.register_forward_hook(hook_function)
 model.forward(inputs)
 ```
 
+
 # `HookFunction` Groups
 `HookFunction`s can be associated with group tags. Using these tags, you can
 choose which groups are run during a given forward pass. There are two primary
@@ -126,7 +142,6 @@ def create_hook_group(
     editing_function: Optional[Callable] = None,
     unpack_idx: Optional[int] = 0,
 ```
-
 - `group_name`: Name of the group to tag the created `HookFunctions` under.
 - `group_constructor`: String pattern which is used to match against
 submodule names. For example, setting this to "self_attn" will match any
@@ -170,3 +185,13 @@ Multi-gpu tests are run via `submitit` on a `slurm` cluster. Navigate to
 python run_multi_gpu_tests_slurm.py
 ```
 The multi-gpu tests require 4 GPUs to run.
+
+
+# Important Notes
+- Make sure to replace any instances of `module.forward(inputs)` with
+`module(inputs)`. The forward hooks are not run by PyTorch if you directly call
+the forward function of a module (this is the case with LLaMA).
+- If you would like to create `HookFunction` entrypoints arbitrarily in the
+wrapped model, you can place `DummyModule`s with identity forward functions
+which can be hooked into. `DummyModule` is located in the `core/core_utils.py`
+file.

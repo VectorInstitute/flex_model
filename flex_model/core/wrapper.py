@@ -371,7 +371,7 @@ class FlexModel(nn.Module):
             "full_backward": "register_full_backward_hook",
             "tensor": "register_hook",
             "forward_pre": "register_forward_pre_hook",
-            "backward_pre": "register_full_backward_pre_hook",
+            "full_backward_pre": "register_full_backward_pre_hook",
         }
         # Map: submodule -> hook functions -> hook handle.
         self._module_to_hook_fns_map: Dict[
@@ -464,6 +464,10 @@ class FlexModel(nn.Module):
         register_fn = getattr(
             module, self._hook_type_to_pt_attr[hook_function._hook_type], None
         )
+        if register_fn is None:
+            raise Exception(
+                f"Hook function type not found: {hook_function._hook_type}"
+            )
         handle = register_fn(hook_function)
 
         # All registered hooks are members of the "all" hook function group.
@@ -627,7 +631,7 @@ class FlexModel(nn.Module):
 
         :param HookFunction hook_function: `HookFunction` instance to register.
         """
-        self._register_hook_prologue(hook_function, "backward_pre")
+        self._register_hook_prologue(hook_function, "full_backward_pre")
 
     def register_trainable_module(self, name: str, module: nn.Module) -> None:
         """Register trainable module accessible to all :class:`HookFunction` instances.
