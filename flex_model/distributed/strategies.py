@@ -2,7 +2,8 @@ from typing import Any, Callable, Dict, List
 
 from torch import Tensor
 
-import flex_model.distributed as dist
+import flex_model.distributed as fm_dist
+from flex_model.distributed.distributed_state import _LocalParallelStateAPI
 
 """
 We define strategies for:
@@ -44,7 +45,9 @@ class ParameterTensorParallelRoutingStrategy(BaseRoutingStrategy):
     """Defines a routing strategy for parameter tensors supporting TP sharding."""
 
     @classmethod
-    def initialize(cls, tensor: Tensor, expected_shape) -> None:
+    def initialize(
+        cls, fmps: _LocalParallelStateAPI, tensor: Tensor, expected_shape
+    ) -> None:
         # Handle unspecified dimensions.
         input_shape = tensor.shape
         if expected_shape is None:
@@ -75,14 +78,17 @@ class ParameterTensorParallelRoutingStrategy(BaseRoutingStrategy):
         sharded_dim = gather_dims[0] if len(gather_dims) > 0 else None
 
         def _gather_only_tp(t):
-            return dist.all_gather_tensor_parallel(t, dim=sharded_dim)
+            return fm_dist.all_gather_tensor_parallel(t, sharded_dim, fmps)
+
+        def _unity(t):
+            return fm_dist.unity(t, fmps)
 
         if gather_tp:
             prologue_fn = _gather_only_tp
         else:
-            prologue_fn = dist.unity
+            prologue_fn = _unity
 
-        epilogue_fn = dist.unity
+        epilogue_fn = _unity
 
         return cls(prologue_fn, epilogue_fn)
 
@@ -94,8 +100,10 @@ class ActivationTensorAllToAllRoutingStrategy(BaseRoutingStrategy):
     """
 
     @classmethod
-    def initialize(cls, tensor: Tensor, expected_shape) -> None:
-        dp_world_size = dist.get_data_parallel_world_size()
+    def initialize(
+        cls, fmps: _LocalParallelStateAPI, tensor: Tensor, expected_shape
+    ) -> None:
+        dp_world_size = fmps.get_data_parallel_world_size()
 
         # Handle unspecified dimensions.
         input_shape = tensor.shape
@@ -132,32 +140,37 @@ class ActivationTensorAllToAllRoutingStrategy(BaseRoutingStrategy):
 
         # Define helper functions for collection/dispersion.
         def _gather_only_tp(t):
-            return dist.all_gather_tensor_parallel(t, dim=sharded_dim)
+            return fm_dist.all_gather_tensor_parallel(t, sharded_dim, fmps)
 
         def _scatter_only_tp(t):
-            return dist.scatter_tensor_parallel(t, dim=sharded_dim)
+            return fm_dist.scatter_tensor_parallel(t, sharded_dim, fmps)
 
         def _gather_only_dp(t):
-            return dist.all_gather_data_parallel(t, dim=0)
+            return fm_dist.all_gather_data_parallel(t, 0, fmps)
 
         def _scatter_only_dp(t):
-            return dist.scatter_data_parallel(t, dim=0)
+            return fm_dist.scatter_data_parallel(t, 0, fmps)
 
         def _gather_tp_then_dp(t):
-            return dist.all_gather_data_parallel(
-                dist.all_gather_tensor_parallel(t, dim=sharded_dim),
-                dim=0,
+            return fm_dist.all_gather_data_parallel(
+                fm_dist.all_gather_tensor_parallel(t, sharded_dim, fmps),
+                0,
+                fmps,
             )
 
         def _scatter_dp_then_tp(t):
-            return dist.scatter_tensor_parallel(
-                dist.scatter_data_parallel(t, dim=0),
-                dim=sharded_dim,
+            return fm_dist.scatter_tensor_parallel(
+                fm_dist.scatter_data_parallel(t, 0, fmps),
+                sharded_dim,
+                fmps,
             )
 
+        def _unity(t):
+            return fm_dist.unity(t, fmps)
+
         if not gather_tp and not gather_dp:
-            prologue_fn = dist.unity
-            epilogue_fn = dist.unity
+            prologue_fn = _unity
+            epilogue_fn = _unity
 
         elif not gather_tp and gather_dp:
             prologue_fn = _gather_only_dp

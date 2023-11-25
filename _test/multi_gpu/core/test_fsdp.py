@@ -1,16 +1,7 @@
-import os
-import functools
 import logging
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
-from torch.distributed.fsdp import BackwardPrefetch, CPUOffload
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
-from transformers import LlamaForCausalLM
-from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
 from flex_model.core import FlexModel, HookFunction
 import _test.multi_gpu.testing_utils as utils
@@ -19,7 +10,7 @@ from _test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
 
 (
     register_fsdp_test,
-    get_fsdo_test,
+    get_fsdp_test,
 ) = make_test_registry("fsdp", SlurmJobResourceSpec(time=10))
 
 
@@ -112,85 +103,11 @@ LLAMA_MODULES_FSDP = {
 }
 
 
-def make_llama2():
-    base_model = LlamaForCausalLM.from_pretrained(
-        "/model-weights/Llama-2-7b-hf",
-        local_files_only=True,
-        torch_dtype=torch.bfloat16,
-    )
-    return base_model
-
-
-def make_llama2_fsdp():
-    # Load llama-2 model and prepare it for FSDP (CPU RAM-efficient)
-    if dist.get_rank() == 0:
-        base_model = make_llama2()
-        param_init_fn = None
-    else:
-        with torch.device("meta"):
-            base_model = make_llama2()
-
-        def _param_init_fn(module: nn.Module):
-            module = module.to_empty(
-                device=torch.cuda.current_device(), recurse=False
-            )
-            return module
-
-        param_init_fn = _param_init_fn
-
-    # Initialize fsdp options.
-    backward_prefetch = BackwardPrefetch.BACKWARD_PRE
-
-    # Shard model parameters, optimizer, grads over all GPUs.
-    sharding_strategy = ShardingStrategy.FULL_SHARD
-
-    mixed_precision = MixedPrecision(
-        param_dtype=torch.bfloat16,
-        reduce_dtype=torch.bfloat16,
-        buffer_dtype=torch.bfloat16,
-        cast_root_forward_inputs=True,
-    )
-
-    # Don't offload to CPU.
-    cpu_offload = CPUOffload(offload_params=False)
-
-    transformer_auto_wrapper_policy = functools.partial(
-        transformer_auto_wrap_policy,
-        transformer_layer_cls={LlamaDecoderLayer},
-    )
-
-    # Wrap model.
-    model = FSDP(
-        base_model,
-        process_group=None,  # default pg.
-        sharding_strategy=sharding_strategy,
-        cpu_offload=cpu_offload,
-        auto_wrap_policy=transformer_auto_wrapper_policy,
-        backward_prefetch=backward_prefetch,
-        mixed_precision=mixed_precision,
-        ignored_modules=None,
-        param_init_fn=param_init_fn,
-        device_id=torch.cuda.current_device(),
-        sync_module_states=True,
-        forward_prefetch=True,
-        limit_all_gathers=True,
-        use_orig_params=False,
-    )
-
-    return model
-
-
-def init_dist():
-    dist.init_process_group("nccl")
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    torch.cuda.set_device(local_rank)
-
-
 @register_fsdp_test
 def test_fsdp_llama():
-    init_dist()
+    utils.Utils.initialize_torch_distributed()
 
-    model = make_llama2_fsdp()
+    model = utils.wrap_fsdp("llama_7b")
 
     tokenizer = utils.llama_tokenizer()
 
@@ -229,39 +146,40 @@ def test_fsdp_llama():
         for k, v in multi_gpu_activations.items()
     }
 
-    # Shut-down the distributed processes
-    del flex_model  # Run finalizer which destroys distributed state.
-    if dist.get_rank() != 0:
-        return
-    dist.destroy_process_group()
+    del flex_model  # Run finalizer.
 
-    # Single-gpu
-    dist.init_process_group("nccl", world_size=1, rank=0)
-    all_single_gpu_activations = {}
-    single_gpu_activations = {}
-    model = make_llama2().cuda()
+    with utils.Utils.single_gpu_context():
+        # Single-gpu
+        all_single_gpu_activations = {}
+        single_gpu_activations = {}
+        model = utils.llama_7b().cuda()
 
-    flex_model = FlexModel(model, single_gpu_activations)
+        flex_model = FlexModel(model, single_gpu_activations)
 
-    for module_name, expected_shape in LLAMA_MODULES.items():
-        flex_model.register_forward_hook(
-            HookFunction(module_name, expected_shape)
-        )
+        for module_name, expected_shape in LLAMA_MODULES.items():
+            flex_model.register_forward_hook(
+                HookFunction(module_name, expected_shape)
+            )
 
-    for chunk in chunked_inputs:
-        _ = flex_model(inputs.cuda())
-        for k, v in single_gpu_activations.items():
-            all_single_gpu_activations[k] = v
-        single_gpu_activations.clear()
+        for chunk in chunked_inputs:
+            _ = flex_model(inputs.cuda())
+            for k, v in single_gpu_activations.items():
+                all_single_gpu_activations[k] = v
+            single_gpu_activations.clear()
 
-    # Make sure activations are equal
-    for k in single_gpu_activations.keys():
-        assert torch.allclose(
-            all_single_gpu_activations[k][0],
-            multi_gpu_activations_[k][0],
-        ), (
-            f"Failed: {k}, max diff: "
-            f"{(all_single_gpu_activations[k] - multi_gpu_activations_[k]).abs().max()}"
-        )
+        # Make sure activations are equal
+        assert len(all_single_gpu_activations) == len(LLAMA_MODULES)
+        assert len(multi_gpu_activations) == len(LLAMA_MODULES_FSDP)
+        for k in single_gpu_activations.keys():
+            assert torch.allclose(
+                all_single_gpu_activations[k][0],
+                multi_gpu_activations_[k][0],
+            ), (
+                f"Failed: {k}, max diff: "
+                f"{(all_single_gpu_activations[k] - multi_gpu_activations_[k]).abs().max()}"
+            )
 
     logger.info("Tests successful.")
+
+
+test_fsdp_llama()

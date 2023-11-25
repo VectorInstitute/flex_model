@@ -2,10 +2,10 @@
 https://download.pytorch.org/whl/cu118/torch-2.1.1%2Bcu118-cp39-cp39-linux_x86_64.whl
 
 accelerate
-black
 coverage
 fairscale
 pre-commit
+ruff
 sentencepiece
 sphinx-rtd-theme
 tokenizers

@@ -6,7 +6,7 @@ from typing import Any, Callable, Optional, Tuple, Union
 import torch.nn as nn
 from torch import Tensor
 
-import flex_model.distributed as dist
+import flex_model.distributed as fm_dist
 from flex_model.traverse import (
     InternalObject,
     LeafObject,
@@ -153,9 +153,9 @@ class HookFunction:
         self.module = None  # Safe to cache this state, never changes.
 
         # Default strategies, initialized once at first runtime.
-        self.routing_strategy = dist.ActivationTensorAllToAllRoutingStrategy
-        self.offload_strategy = dist.CPUPinnedMemoryOffloadStrategy
-        self.function_strategy = dist.NonValidatedFunctionStrategy
+        self.routing_strategy = fm_dist.ActivationTensorAllToAllRoutingStrategy
+        self.offload_strategy = fm_dist.CPUPinnedMemoryOffloadStrategy
+        self.function_strategy = fm_dist.NonValidatedFunctionStrategy
 
         # Valid hook function implementations.
         self.hook_type_to_impl_fn = {
@@ -227,9 +227,11 @@ class HookFunction:
         This function is used alone in cases where hook functions operate
         directly on a tensor, and not an entire module.
         """
-        if not isinstance(self.routing_strategy, dist.BaseRoutingStrategy):
+        if not isinstance(self.routing_strategy, fm_dist.BaseRoutingStrategy):
             self.routing_strategy = self.routing_strategy.initialize(
-                tensor, self.expected_shape
+                self._shared_state.fmps,
+                tensor,
+                self.expected_shape,
             )
             self.offload_strategy = self.offload_strategy.initialize(
                 self.module_name, self._shared_state.output_ptr

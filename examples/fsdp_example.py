@@ -59,6 +59,7 @@ def make_llama2_fsdp(checkpoint_dir):
             checkpoint_dir,
             local_files_only=True,
             torch_dtype=torch.bfloat16,
+            use_safetensors=False,
         )
         param_init_fn = None
     else:
@@ -67,6 +68,7 @@ def make_llama2_fsdp(checkpoint_dir):
                 checkpoint_dir,
                 local_files_only=True,
                 torch_dtype=torch.bfloat16,
+                use_safetensors=False,
             )
 
         def _param_init_fn(module: nn.Module):

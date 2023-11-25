@@ -1,16 +1,17 @@
 import logging
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, asdict, fields
+import pprint
+from typing import List, Optional, Dict
+import weakref
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 
 logger = logging.getLogger(__name__)
 
 
-_TENSOR_PARALLEL_GROUP = None
-_DATA_PARALLEL_GROUP = None
-_PIPELINE_PARALLEL_GROUP = None
+_GLOBAL_PARALLEL_STATE = None
 
 
 @dataclass
@@ -36,7 +37,6 @@ class GPUDeviceMesh:
     @classmethod
     def build(
         cls,
-        world_size: int,
         tensor_parallel_size: int,
         pipeline_parallel_size: int,
         data_parallel_size: int,
@@ -87,6 +87,9 @@ class GPUDeviceMesh:
         :returns: Instantiated :class:`GPUDeviceMesh` containing mesh of all
             distributed groups.
         """
+        world_size = (
+            tensor_parallel_size * pipeline_parallel_size * data_parallel_size
+        )
         mesh = torch.arange(world_size).reshape(
             pipeline_parallel_size,
             data_parallel_size,
@@ -118,14 +121,12 @@ class GPUDeviceMesh:
         return cls(tp_group_ranks, pp_group_ranks, dp_group_ranks)
 
 
-def _initialize_gpu_mesh(
-    world_size: int,
+def _initialize_local_gpu_device_mesh(
     tensor_parallel_size: int,
     pipeline_parallel_size: int,
     data_parallel_size: int,
 ) -> GPUDeviceMesh:
     device_mesh = GPUDeviceMesh.build(
-        world_size,
         tensor_parallel_size,
         pipeline_parallel_size,
         data_parallel_size,
@@ -133,50 +134,197 @@ def _initialize_gpu_mesh(
     return device_mesh
 
 
-def _initialize_distributed_groups(device_mesh: GPUDeviceMesh) -> None:
+def _initialize_distributed_groups(
+    rank: int,
+    device_mesh: GPUDeviceMesh,
+) -> None:
     """Initializes the torch distributed groups.
 
     Constructs the torch distributed groups defined in the device mesh
     and saves the corresponding group handles for the local device.
     """
-    rank = dist.get_rank()
-
     # Initialize torch distributed tp groups
-    global _TENSOR_PARALLEL_GROUP
     for group_ranks in device_mesh.tp_group_ranks:
         group = dist.new_group(group_ranks)
         if rank in group_ranks:
-            _TENSOR_PARALLEL_GROUP = group
+            tp_group = group
             logger.debug(
                 f"Torch rank {dist.get_rank()} init TP group: {group_ranks}"
             )
 
     # Initialize torch distributed dp groups
-    global _DATA_PARALLEL_GROUP
     for group_ranks in device_mesh.dp_group_ranks:
         group = dist.new_group(group_ranks)
         if rank in group_ranks:
-            _DATA_PARALLEL_GROUP = group
+            dp_group = group
             logger.debug(
                 f"Torch rank {dist.get_rank()} init DP group: {group_ranks}"
             )
 
     # Initialize torch distributed pp groups
-    global _PIPELINE_PARALLEL_GROUP
     for group_ranks in device_mesh.pp_group_ranks:
         group = dist.new_group(group_ranks)
         if rank in group_ranks:
-            _PIPELINE_PARALLEL_GROUP = group
+            pp_group = group
             logger.debug(
                 f"Torch rank {dist.get_rank()} init PP group: {group_ranks}"
             )
 
+    return tp_group, pp_group, dp_group
+
+
+@dataclass
+class LocalParallelState:
+    local_process_group: dist.ProcessGroup
+    local_rank: int
+    local_world_view: List[int]
+    local_tp_group: dist.ProcessGroup
+    local_pp_group: dist.ProcessGroup
+    local_dp_group: dist.ProcessGroup
+    local_mesh: GPUDeviceMesh
+
+    def __repr__(self):
+        _repr = "LocalParallelState(\n"
+        for field in fields(self):
+            _repr += f"\t{field.name}: {getattr(self, field.name)}\n"
+        _repr += ")"
+        return _repr
+
+
+@dataclass
+class GlobalParallelState:
+    global_world_view: List[int]
+    model_to_subset_state_map: Dict[nn.Module, LocalParallelState] = None
+
+
+def _initialize_global_distributed_state(global_world_view):
+    global _GLOBAL_PARALLEL_STATE
+    _GLOBAL_PARALLEL_STATE = GlobalParallelState(
+        global_world_view=global_world_view,
+        model_to_subset_state_map={},
+    )
+
+    return
+
+
+def _dataclass_from_dict(cls, mapping):
+    cls_fields = {f.name for f in fields(cls) if f.init}
+    arg_fields = {
+        name: value for name, value in mapping.items() if name in cls_fields
+    }
+    return cls(**arg_fields)
+
+
+def _local_to_subset_device_mesh(
+    local_world_view_device_mesh, local_to_subset_view_map
+):
+    axis_name_to_local_axis_groups = asdict(local_world_view_device_mesh)
+
+    # Convert each axis from local -> subset rank.
+    subset_axis_groups = {}
+    for axis_name, local_axis_groups in axis_name_to_local_axis_groups.items():
+        subset_axis_group = [
+            [local_to_subset_view_map[rank] for rank in local_axis_group]
+            for local_axis_group in local_axis_groups
+        ]
+        subset_axis_groups[axis_name] = subset_axis_group
+
+    # Instantiate new device mesh.
+    subset_world_view_device_mesh = _dataclass_from_dict(
+        GPUDeviceMesh, subset_axis_groups
+    )
+
+    return subset_world_view_device_mesh
+
+
+def _initialize_local_distributed_state(
+    process_group,
+    subset_rank,
+    local_rank,
+    subset_world_view,
+    local_world_view,
+    subset_to_local_view_map,
+    local_to_subset_view_map,
+    tp_size,
+    pp_size,
+    dp_size,
+):
+    # Create device meshes.
+    local_world_view_device_mesh = _initialize_local_gpu_device_mesh(
+        tp_size, pp_size, dp_size
+    )
+    subset_world_view_device_mesh = _local_to_subset_device_mesh(
+        local_world_view_device_mesh,
+        local_to_subset_view_map,
+    )
+
+    # Create distributed groups.
+    if process_group is None:
+        process_group = dist.new_group(
+            ranks=subset_world_view,
+            backend="nccl",
+        )
+
+    (
+        local_tp_group,
+        local_pp_group,
+        local_dp_group,
+    ) = _initialize_distributed_groups(
+        subset_rank,
+        subset_world_view_device_mesh,
+    )
+
+    # Create local state.
+    local_parallel_state = LocalParallelState(
+        process_group,
+        local_rank,
+        local_world_view,
+        local_tp_group,
+        local_pp_group,
+        local_dp_group,
+        local_world_view_device_mesh,
+    )
+
+    # Complete new local state entry.
+    model_to_state_map_entry = {
+        "local_parallel_state": local_parallel_state,
+        "subset_rank": subset_rank,
+        "subset_world_view": subset_world_view,
+        "subset_world_view_device_mesh": subset_world_view_device_mesh,
+        "subset_to_local_view_map": subset_to_local_view_map,
+        "local_to_subset_view_map": local_to_subset_view_map,
+    }
+
+    return model_to_state_map_entry
+
+
+def _global_state_is_initialized():
+    global _GLOBAL_PARALLEL_STATE
+    return False if _GLOBAL_PARALLEL_STATE is None else True
+
+
+def _get_global_state():
+    global _GLOBAL_PARALLEL_STATE
+    assert _GLOBAL_PARALLEL_STATE is not None
+    return _GLOBAL_PARALLEL_STATE
+
+
+def _set_global_state(model, model_to_state_map_entry):
+    gs = _get_global_state()
+    gs.model_to_subset_state_map[model] = model_to_state_map_entry
+
+
+def _destroy_global_state():
+    global _GLOBAL_PARALLEL_STATE
+    _GLOBAL_PARALLEL_STATE = None
+
 
 def initialize_distributed_state(
-    world_size: int,  # TODO: Not needed.
+    model: nn.Module,
     tensor_parallel_size: int,
     pipeline_parallel_size: int,
     data_parallel_size: int,
+    process_group: Optional[dist.ProcessGroup] = None,
 ) -> None:
     """Main entry point from :class:`FlexModel` to initialize distributed backend.
 
@@ -195,168 +343,165 @@ def initialize_distributed_state(
         and dp sizes.
     """
     assert (
-        world_size
-        == tensor_parallel_size * pipeline_parallel_size * data_parallel_size
+        dist.is_initialized()
+    ), "Please call `torch.distributed.init_process_group()`"
+    assert dist.get_world_size(group=process_group) == (
+        tensor_parallel_size * pipeline_parallel_size * data_parallel_size
+    )
+    # Global world view: [0, 1, 2, 3, 4, 5, 6, 7]
+    # Subset world view: [2, 3, 6, 7]
+    # Local world view: [0, 1, 2, 3]
+    # Global-local map: {2: 0, 3: 1, 6: 2, 7: 3}
+
+    # Construct world views.
+    global_world_view = list(range(dist.get_world_size()))
+
+    if process_group is None:  # subset is entire world
+        subset_world_view = list(range(dist.get_world_size()))
+    else:
+        subset_world_view = dist.get_process_group_ranks(group=process_group)
+
+    local_world_view = list(range(len(subset_world_view)))
+
+    logger.debug(
+        f"Initializing distributed state with world views:\n"
+        f"Global: {global_world_view}\n"
+        f"Subset: {subset_world_view}\n"
+        f"Local : {local_world_view}"
     )
 
-    if not torch.distributed.is_initialized():
-        torch.distributed.init_process_group("nccl")
+    # Construct mappings between world views.
+    subset_to_local_view_map = {
+        g_rank: l_rank
+        for g_rank, l_rank in zip(subset_world_view, local_world_view)
+    }
+    local_to_subset_view_map = {
+        l_rank: g_rank
+        for g_rank, l_rank in zip(subset_world_view, local_world_view)
+    }
+    logger.debug(
+        f"Created mappings between world views: "
+        f"[subset -> local]{subset_to_local_view_map} - "
+        f"[local -> subset]{local_to_subset_view_map}"
+    )
 
-    device_mesh = _initialize_gpu_mesh(
-        world_size,
+    # Get device rank assignment in each world view.
+    subset_rank = dist.get_rank(group=process_group)
+    local_rank = subset_to_local_view_map[subset_rank]
+    logger.debug(
+        f"Rank assignment: subset[{subset_rank}] - local[{local_rank}]"
+    )
+
+    # Initialize global state.
+    if not _global_state_is_initialized():
+        _initialize_global_distributed_state(global_world_view)
+        logger.debug("Initialized global state")
+
+    # Initialize local state and attach it to the global state.
+    model_to_state_map_entry = _initialize_local_distributed_state(
+        process_group,
+        subset_rank,
+        local_rank,
+        subset_world_view,
+        local_world_view,
+        subset_to_local_view_map,
+        local_to_subset_view_map,
         tensor_parallel_size,
         pipeline_parallel_size,
         data_parallel_size,
     )
-    _initialize_distributed_groups(device_mesh)
+
+    _set_global_state(model, model_to_state_map_entry)
+
+    logger.debug(
+        f"Initialized local state:\n"
+        f"Model: {model}\n"
+        f"Local state:\n"
+        f"{pprint.pformat(model_to_state_map_entry, indent=4, sort_dicts=False)}"
+    )
+
+    # FlexModel-local Parallel State.
+    fmps = _LocalParallelStateAPI(model)
+
+    return fmps
 
 
-def distributed_state_is_initialized() -> bool:
-    """Check if activation parallel backend has been initialized.
+def _finalize_local_parallel_state_api(model_reference):
+    global _GLOBAL_PARALLEL_STATE
 
-    :returns: True if any tensor, pipeline or data parallel groups have been
-        initialized.
-    :rtype: bool
-    """
-    global _TENSOR_PARALLEL_GROUP
-    global _DATA_PARALLEL_GROUP
-    global _PIPELINE_PARALLEL_GROUP
+    # Likely that model is being destructed, remove all references.
+    del _GLOBAL_PARALLEL_STATE.model_to_subset_state_map[model_reference]
 
-    if (
-        _TENSOR_PARALLEL_GROUP is None
-        or _DATA_PARALLEL_GROUP is None
-        or _PIPELINE_PARALLEL_GROUP is None
-    ):
-        return False
-    return True
+    # Cleanup global state if there are no more local state contexts.
+    if len(_GLOBAL_PARALLEL_STATE.model_to_subset_state_map) == 0:
+        _destroy_global_state()
+
+    logger.debug("Local parallel state api finalized")
 
 
-def get_tensor_parallel_group() -> dist.ProcessGroup:
-    """Get the tensor parallel group handle the local device belongs to.
+class _LocalParallelStateAPI:
+    def __init__(self, model_reference):
+        self.model_reference = model_reference
 
-    :returns: The tensor parallel distributed group.
-    :rtype: Optional[pt_dist.ProcessGroup]
+        global _GLOBAL_PARALLEL_STATE
+        self.model_entry = _GLOBAL_PARALLEL_STATE.model_to_subset_state_map[
+            self.model_reference
+        ]
+        self.ls = self.model_entry["local_parallel_state"]
 
-    :raises AssertionError: If the activation parallel backend hasn't been
-        initialized yet.
-    """
-    global _TENSOR_PARALLEL_GROUP
-    assert (
-        _TENSOR_PARALLEL_GROUP is not None
-    ), "Tensor parallel group is not initialized"
-    return _TENSOR_PARALLEL_GROUP
+        self._finalizer = weakref.finalize(
+            self,
+            _finalize_local_parallel_state_api,
+            self.model_reference,
+        )
 
+    def get_local_process_group(self) -> int:
+        return self.ls.local_process_group
 
-def get_pipeline_parallel_group() -> dist.ProcessGroup:
-    """Get the pipeline parallel group handle the local device belongs to.
+    def get_local_rank(self) -> int:
+        return dist.get_rank(group=self.get_local_process_group())
 
-    :returns: The pipeline parallel distributed group.
-    :rtype: pt_dist.ProcessGroup
+    def get_local_world_size(self) -> int:
+        return dist.get_world_size(group=self.get_local_process_group())
 
-    :raises AssertionError: If the activation parallel backend hasn't been
-        initialized yet.
-    """
-    global _PIPELINE_PARALLEL_GROUP
-    assert (
-        _PIPELINE_PARALLEL_GROUP is not None
-    ), "Pipeline parallel group is not initialized"
-    return _PIPELINE_PARALLEL_GROUP
+    def get_subset_rank(self) -> int:
+        return dist.get_rank()
 
+    def get_subset_world_size(self) -> int:
+        return dist.get_world_size()
 
-def get_data_parallel_group() -> dist.ProcessGroup:
-    """Get the data parallel group handle the local device belongs to.
+    def get_tensor_parallel_group(self) -> dist.ProcessGroup:
+        assert self.ls.local_tp_group is not None
+        return self.ls.local_tp_group
 
-    :returns: The data parallel distributed group.
-    :rtype: pt_dist.ProcessGroup
+    def get_pipeline_parallel_group(self) -> dist.ProcessGroup:
+        assert self.ls.local_pp_group is not None
+        return self.ls.local_pp_group
 
-    :raises AssertionError: If the activation parallel backend hasn't been
-        initialized yet.
+    def get_data_parallel_group(self) -> dist.ProcessGroup:
+        assert self.ls.local_dp_group is not None
+        return self.ls.local_dp_group
 
-    """
-    global _DATA_PARALLEL_GROUP
-    assert (
-        _DATA_PARALLEL_GROUP is not None
-    ), "Data parallel group is not initialized"
-    return _DATA_PARALLEL_GROUP
+    def get_tensor_parallel_world_size(self) -> int:
+        assert self.ls.local_tp_group is not None
+        return dist.get_world_size(self.ls.local_tp_group)
 
+    def get_pipeline_parallel_world_size(self) -> int:
+        assert self.ls.local_pp_group is not None
+        return dist.get_world_size(self.ls.local_pp_group)
 
-def get_tensor_parallel_world_size() -> int:
-    """Get the number of devices in the tensor parallel group.
+    def get_data_parallel_world_size(self) -> int:
+        assert self.ls.local_dp_group is not None
+        return dist.get_world_size(self.ls.local_dp_group)
 
-    :returns: Tensor parallel world size.
-    :rtype: int
+    def get_tensor_parallel_rank(self) -> int:
+        assert self.ls.local_tp_group is not None
+        return dist.get_rank(self.ls.local_tp_group)
 
-    :raises AssertionError: If the activation parallel backend hasn't been
-        initialized yet.
-    """
-    return dist.get_world_size(group=get_tensor_parallel_group())
+    def get_pipeline_parallel_rank(self) -> int:
+        assert self.ls.local_pp_group is not None
+        return dist.get_rank(self.ls.local_pp_group)
 
-
-def get_pipeline_parallel_world_size() -> int:
-    """Get the number of devices in the pipeline parallel group.
-    :returns: Pipeline parallel world size.
-    :rtype: int
-
-    :raises AssertionError: If the activation parallel backend hasn't been
-        initialized yet.
-
-    """
-    return dist.get_world_size(group=get_pipeline_parallel_group())
-
-
-def get_data_parallel_world_size() -> int:
-    """Get the number of devices in the data parallel group.
-    :returns: Data parallel world size.
-    :rtype: int
-
-    :raises AssertionError: If the activation parallel backend hasn't been
-        initialized yet.
-
-    """
-    return dist.get_world_size(group=get_data_parallel_group())
-
-
-def get_tensor_parallel_rank() -> int:
-    """Get the rank of the local device in the tensor parallel group.
-    :returns: Tensor parallel rank.
-    :rtype: int
-
-    :raises AssertionError: If the activation parallel backend hasn't been
-        initialized yet.
-
-    """
-    return dist.get_rank(group=get_tensor_parallel_group())
-
-
-def get_pipeline_parallel_rank() -> int:
-    """Get the rank of the local device in the pipeline parallel group.
-    :returns: Pipeline parallel rank.
-    :rtype: int
-
-    :raises AssertionError: If the activation parallel backend hasn't been
-        initialized yet.
-
-    """
-    return dist.get_rank(group=get_pipeline_parallel_group())
-
-
-def get_data_parallel_rank() -> int:
-    """Get the rank of the local device in the data parallel group.
-    :returns: Data parallel rank.
-    :rtype: int
-
-    :raises AssertionError: If the activation parallel backend hasn't been
-        initialized yet.
-
-    """
-    return dist.get_rank(group=get_data_parallel_group())
-
-
-def destroy_distributed_state() -> None:
-    """Delete all handles to tensor, pipeline and data parallel groups."""
-    global _TENSOR_PARALLEL_GROUP
-    global _DATA_PARALLEL_GROUP
-    global _PIPELINE_PARALLEL_GROUP
-    _TENSOR_PARALLEL_GROUP = None
-    _DATA_PARALLEL_GROUP = None
-    _PIPELINE_PARALLEL_GROUP = None
+    def get_data_parallel_rank(self) -> int:
+        assert self.ls.local_dp_group is not None
+        return dist.get_rank(self.ls.local_dp_group)

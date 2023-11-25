@@ -1,4 +1,5 @@
 import functools
+import os
 import logging
 import weakref
 from argparse import Namespace
@@ -20,7 +21,9 @@ import torch.nn as nn
 from torch import Tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-import flex_model.distributed as dist
+from flex_model.utils import setup_logger
+import flex_model.distributed as fm_dist
+from flex_model.distributed.distributed_state import _LocalParallelStateAPI
 
 from .hook_function import HookFunction
 
@@ -29,11 +32,21 @@ logger = logging.getLogger(__name__)
 
 def _get_module(root_module: nn.Module, tgt_module_name: str) -> nn.Module:
     submodule_names = tgt_module_name.split(".")
+
     # Can access submodules by `a.b`, but some modules require `a[b]`.
+    def _getattr_with_fallback(obj, attr_name):
+        if not isinstance(obj, (nn.ModuleList, nn.Sequential)):
+            attr = getattr(obj, attr_name, None)
+        else:
+            attr = obj[int(attr_name)]
+
+        if attr is None:
+            raise Exception(f"Object {obj} has no attr {attr_name}")
+
+        return attr
+
     return functools.reduce(
-        lambda carry, n: getattr(carry, n)
-        if not isinstance(carry, (nn.ModuleList, nn.Sequential))
-        else carry[int(n)],
+        _getattr_with_fallback,
         submodule_names,
         root_module,
     )
@@ -41,6 +54,7 @@ def _get_module(root_module: nn.Module, tgt_module_name: str) -> nn.Module:
 
 @dataclass
 class _SharedState:
+    fmps: _LocalParallelStateAPI
     output_ptr: Dict[str, List[Tensor]]
     save_ctx: Namespace
     modules: nn.ModuleDict
@@ -238,10 +252,6 @@ def _finalize_dangling_state(
             handle.remove()
     hook_functions.clear()
 
-    # Clear distributed states.
-    if dist.distributed_state_is_initialized():
-        dist.destroy_distributed_state()
-
 
 class FlexModel(nn.Module):
     """Wraps a Pytorch :code:`nn.Module` to provide an interface for various
@@ -328,6 +338,7 @@ class FlexModel(nn.Module):
         tensor_parallel_size: int = 1,
         pipeline_parallel_size: int = 1,
         data_parallel_size: int = 1,
+        process_group: Optional[torch.distributed.ProcessGroup] = None,
     ):
         """Initialize the instance by wrapping the Pytorch module.
 
@@ -342,6 +353,9 @@ class FlexModel(nn.Module):
             parallel group.
         """
         super().__init__()
+        if os.environ.get("FLEXMODEL_DEBUG", False):
+            setup_logger(os.environ["FLEXMODEL_DEBUG"])
+
         self.module = module
 
         self.output_ptr = output_ptr
@@ -352,13 +366,14 @@ class FlexModel(nn.Module):
         self.dp_size = data_parallel_size
 
         # Initialize FM distributed.
-        world_size = self.tp_size * self.pp_size * self.dp_size
-        dist.initialize_distributed_state(
-            world_size, self.tp_size, self.pp_size, self.dp_size
+        self.process_group = process_group
+        self.fmps = fm_dist.initialize_distributed_state(
+            self.module, self.tp_size, self.pp_size, self.dp_size, process_group
         )
 
         # Create shared state between FM instance and HF instances.
         self._shared_state = _SharedState(
+            self.fmps,
             self.output_ptr,
             self.save_ctx,
             self.trainable_modules,
@@ -381,7 +396,7 @@ class FlexModel(nn.Module):
 
         # Strategy for parameter gathering.
         self._param_routing_strategy = (
-            dist.ParameterTensorParallelRoutingStrategy
+            fm_dist.ParameterTensorParallelRoutingStrategy
         )
 
         # Setup finalizer for cleanup.
@@ -408,10 +423,10 @@ class FlexModel(nn.Module):
 
     def _flush_pipeline(self) -> None:
         """Gather tensors from all pipeline stages to the first stage."""
-        pp_rank = dist.get_pipeline_parallel_rank()
-        pp_world_size = dist.get_pipeline_parallel_world_size()
+        pp_rank = self.fmps.get_pipeline_parallel_rank()
+        pp_world_size = self.fmps.get_pipeline_parallel_world_size()
         if pp_rank == 0 and pp_world_size > 1:
-            gathered_acts = dist.gather_pipeline_parallel_tensor_dicts(
+            gathered_acts = fm_dist.gather_pipeline_parallel_tensor_dicts(
                 self.output_ptr
             )
 
@@ -456,8 +471,6 @@ class FlexModel(nn.Module):
 
     def _register_hook_impl(self, hook_function: HookFunction) -> None:
         """Pytorch `nn.Module` hook function registration implementation."""
-        # TODO: `get_module` should work with the parameter tensors in the case
-        #       of `register_hook(Tensor)`. Needs verification.
         module = _get_module(self.module, hook_function.module_name)
 
         # Register hook function to pt module.
@@ -676,6 +689,7 @@ class FlexModel(nn.Module):
 
         local_param = self.module.get_parameter(parameter_name).detach()
         self._param_routing_strategy.initialize(
+            self.fmps,
             local_param,
             expected_shape,
         )

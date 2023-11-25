@@ -69,12 +69,14 @@ def setup_model(model_path: str) -> tuple[nn.Module, LlamaConfig]:
         model = LlamaForCausalLM.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16,
+            use_safetensors=False,
         )
     else:
         with torch.device("meta"):
             model = LlamaForCausalLM.from_pretrained(
                 model_path,
                 torch_dtype=torch.bfloat16,
+                use_safetensors=False,
             )
     return model, config
 
