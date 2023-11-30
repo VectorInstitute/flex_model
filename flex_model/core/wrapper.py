@@ -10,6 +10,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Iterator,
     Optional,
     Set,
     Tuple,
@@ -355,6 +356,8 @@ class FlexModel(nn.Module):
         super().__init__()
         if os.environ.get("FLEXMODEL_DEBUG", False):
             setup_logger(os.environ["FLEXMODEL_DEBUG"])
+        else:
+            setup_logger("info")
 
         self.module = module
 
@@ -479,8 +482,10 @@ class FlexModel(nn.Module):
         )
         if register_fn is None:
             raise Exception(
-                f"Hook function type not found: {hook_function._hook_type}"
+                f"Hook function type not found: {hook_function._hook_type} for "
+                f"module {module}"
             )
+
         handle = register_fn(hook_function)
 
         # All registered hooks are members of the "all" hook function group.
@@ -492,14 +497,13 @@ class FlexModel(nn.Module):
     ) -> None:
         """Validate hook function and set state."""
         # Validate hook function.
-        if (
-            "_fsdp_wrapped_module" in hook_function.module_name
-            and hook_type == "tensor"
-        ):
-            raise NotImplementedError(
-                "Pytorch FSDP is currently not supported for parameter/grad "
-                "level hooks yet."
-            )
+        # TODO: If using DDP, need to call our own all-reduce manually since
+        #       we can't rely on hook execution order.
+        if hook_type == "tensor":
+            if isinstance(self.module, FSDP):  # , DDP)):
+                raise NotImplementedError(
+                    "Pytorch FSDP/DDP is currently not supported for parameter/grad-level hook functions, ie. `register_hook(Tensor)`. We cannot currently guarantee tensor hook execution order or parameter buffer access with FSDP/DDP"
+                )
         assert (
             hook_type in self._hook_type_to_pt_attr
         ), "Invalid hook type provided: {hook_type}"
@@ -724,6 +728,14 @@ class FlexModel(nn.Module):
         :rtype: List[str]
         """
         return self.wrapped_module_names + self.trainable_module_names
+
+    def named_parameters(
+        self, *args, **kwargs
+    ) -> Iterator[Tuple[str, nn.Parameter]]:
+        return self.module.named_parameters(*args, **kwargs)
+
+    def named_buffers(self, *args, **kwargs) -> Iterator[Tuple[str, Tensor]]:
+        return self.module.named_buffers(*args, **kwargs)
 
     def restore(self) -> nn.Module:
         """Cleans up dangling states and modifications to wrapped module."""

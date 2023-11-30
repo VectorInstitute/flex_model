@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from torch import Tensor
 
@@ -80,15 +80,18 @@ class ParameterTensorParallelRoutingStrategy(BaseRoutingStrategy):
         def _gather_only_tp(t):
             return fm_dist.all_gather_tensor_parallel(t, sharded_dim, fmps)
 
+        def _scatter_only_tp(t):
+            return fm_dist.scatter_tensor_parallel(t, sharded_dim, fmps)
+
         def _unity(t):
             return fm_dist.unity(t, fmps)
 
         if gather_tp:
             prologue_fn = _gather_only_tp
+            epilogue_fn = _scatter_only_tp
         else:
             prologue_fn = _unity
-
-        epilogue_fn = _unity
+            epilogue_fn = _unity
 
         return cls(prologue_fn, epilogue_fn)
 
@@ -101,8 +104,17 @@ class ActivationTensorAllToAllRoutingStrategy(BaseRoutingStrategy):
 
     @classmethod
     def initialize(
-        cls, fmps: _LocalParallelStateAPI, tensor: Tensor, expected_shape
+        cls,
+        fmps: _LocalParallelStateAPI,
+        tensor: Optional[Tensor],
+        expected_shape,
     ) -> None:
+        def _unity(t):
+            return fm_dist.unity(t, fmps)
+
+        if tensor is None:
+            return cls(_unity, _unity)
+
         dp_world_size = fmps.get_data_parallel_world_size()
 
         # Handle unspecified dimensions.
@@ -164,9 +176,6 @@ class ActivationTensorAllToAllRoutingStrategy(BaseRoutingStrategy):
                 sharded_dim,
                 fmps,
             )
-
-        def _unity(t):
-            return fm_dist.unity(t, fmps)
 
         if not gather_tp and not gather_dp:
             prologue_fn = _unity

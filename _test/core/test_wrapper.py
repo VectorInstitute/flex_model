@@ -2,9 +2,9 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-import torch.distributed as dist
 
 from flex_model.core import FlexModel, HookFunction
+import _test.multi_gpu.testing_utils as utils
 
 MODULE_NAME_1 = "model.decoder.layers.17.fc2"
 MODULE_NAME_2 = "model.decoder.layers.18.fc2"
@@ -21,7 +21,7 @@ def test_register_forward_hook(make_opt_350m):
     Tests if a hook function is registered correctly, and if the fields are set
     appropriately.
     """
-    dist.init_process_group("nccl")
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -38,8 +38,6 @@ def test_register_forward_hook(make_opt_350m):
     assert my_hook_function._shared_state.save_ctx is model.save_ctx
     assert my_hook_function._shared_state.modules is model.trainable_modules
 
-    dist.destroy_process_group()
-
 
 def test_register_trainable_module(make_opt_350m):
     """
@@ -47,7 +45,7 @@ def test_register_trainable_module(make_opt_350m):
     functions (regardless of when they're added), have a pointer to this
     module.
     """
-    dist.init_process_group("nccl")
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -70,11 +68,9 @@ def test_register_trainable_module(make_opt_350m):
     assert my_hook_function_1._shared_state.modules["test"] is trainable_module
     assert my_hook_function_2._shared_state.modules["test"] is trainable_module
 
-    dist.destroy_process_group()
-
 
 def test_trainable_module_gradient(make_opt_350m):
-    dist.init_process_group("nccl")
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -108,14 +104,12 @@ def test_trainable_module_gradient(make_opt_350m):
             torch.count_nonzero(p.grad) != 0
         ), f"Parameter: {n} has all-zero grad field."
 
-    dist.destroy_process_group()
-
 
 def test_destroy(make_opt_350m):
     """
     Tests the destroy method to ensure everything is cleared appropriately.
     """
-    dist.init_process_group("nccl")
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -149,11 +143,9 @@ def test_destroy(make_opt_350m):
             attr = hook_type + "_hooks"
             assert len(getattr(m, attr)) == 0
 
-    dist.destroy_process_group()
-
 
 def test_save_ctx(make_opt_350m, opt_tokenizer):
-    dist.init_process_group("nccl")
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     tokenizer = opt_tokenizer
@@ -205,11 +197,9 @@ def test_save_ctx(make_opt_350m, opt_tokenizer):
         activations["model.decoder.layers.12"][0],
     )
 
-    dist.destroy_process_group()
-
 
 def test_FlexModel_group_all(make_opt_350m):
-    dist.init_process_group("nccl")
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -228,11 +218,9 @@ def test_FlexModel_group_all(make_opt_350m):
     for hf, group in manager.hook_fn_to_groups_map.items():
         assert group == set(["all"])
 
-    dist.destroy_process_group()
-
 
 def test_FlexModel_group_creation(make_opt_350m, opt_tokenizer):
-    dist.init_process_group("nccl")
+    utils.init_process_group()
     model = make_opt_350m().cuda()
     prompts = [
         "It's a nice day we're having",
@@ -294,5 +282,3 @@ def test_FlexModel_group_creation(make_opt_350m, opt_tokenizer):
         if "self_attn" in hook_fn.module_name:
             assert "new_group" in groups
         assert "all" in groups
-
-    dist.destroy_process_group()

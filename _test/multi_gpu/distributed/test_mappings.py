@@ -2,10 +2,10 @@ import logging
 
 import torch
 import torch.nn as nn
-import torch.distributed as dist
 
 import flex_model.distributed as fm_dist
 from _test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
+import _test.multi_gpu.testing_utils as utils
 
 logger = logging.getLogger(__name__)
 
@@ -24,115 +24,105 @@ register_mappings_test, get_mappings_test = make_test_registry(
 
 @register_mappings_test
 def test_broadcast_tensor_parallel():
-    dist.init_process_group("nccl")
+    utils.init_process_group()
 
     model = nn.Linear(2, 4)
     fmps = fm_dist.initialize_distributed_state(model, _NUM_GPUS, 1, 1)
 
-    if fm_dist.get_tensor_parallel_rank() == 0:
+    if fmps.get_tensor_parallel_rank() == 0:
         tensor_to_bcast = torch.ones((1)).cuda()
     else:
         tensor_to_bcast = torch.zeros((1,)).cuda()
     result = fm_dist.broadcast_tensor_parallel(tensor_to_bcast, fmps)
     assert torch.equal(result, torch.ones((1)).cuda())
-
-    dist.destroy_process_group()
+    utils.print_success("test_broadcast_tensor_parallel")
 
 
 @register_mappings_test
 def test_broadcast_data_parallel():
-    dist.init_process_group("nccl")
+    utils.init_process_group()
 
     model = nn.Linear(2, 4)
     fmps = fm_dist.initialize_distributed_state(model, 1, 1, _NUM_GPUS)
 
-    if fm_dist.get_data_parallel_rank() == 0:
+    if fmps.get_data_parallel_rank() == 0:
         tensor_to_bcast = torch.ones((1)).cuda()
     else:
         tensor_to_bcast = torch.zeros((1,)).cuda()
     result = fm_dist.broadcast_data_parallel(tensor_to_bcast, fmps)
     assert torch.equal(result, torch.ones((1)).cuda())
-
-    dist.destroy_process_group()
+    utils.print_success("test_broadcast_data_parallel")
 
 
 @register_mappings_test
 def test_all_gather_tensor_parallel():
-    dist.init_process_group("nccl")
+    utils.init_process_group()
 
     model = nn.Linear(2, 4)
     fmps = fm_dist.initialize_distributed_state(model, _NUM_GPUS, 1, 1)
 
-    tensor_to_gather = (
-        torch.ones((1)).cuda() * fm_dist.get_tensor_parallel_rank()
-    )
+    tensor_to_gather = torch.ones((1)).cuda() * fmps.get_tensor_parallel_rank()
     result = fm_dist.all_gather_tensor_parallel(tensor_to_gather, 0, fmps)
     assert torch.equal(
         result,
-        torch.arange(fm_dist.get_tensor_parallel_world_size()).cuda(),
+        torch.arange(fmps.get_tensor_parallel_world_size()).cuda(),
     )
-
-    dist.destroy_process_group()
+    utils.print_success("test_all_gather_tensor_parallel")
 
 
 @register_mappings_test
 def test_all_gather_data_parallel():
-    dist.init_process_group("nccl")
+    utils.init_process_group()
 
     model = nn.Linear(2, 4)
     fmps = fm_dist.initialize_distributed_state(model, 1, 1, _NUM_GPUS)
 
-    tensor_to_gather = torch.ones((1)).cuda() * fm_dist.get_data_parallel_rank()
+    tensor_to_gather = torch.ones((1)).cuda() * fmps.get_data_parallel_rank()
     result = fm_dist.all_gather_data_parallel(tensor_to_gather, 0, fmps)
     assert torch.equal(
         result,
-        torch.arange(fm_dist.get_data_parallel_world_size()).cuda(),
+        torch.arange(fmps.get_data_parallel_world_size()).cuda(),
     )
-
-    dist.destroy_process_group()
+    utils.print_success("test_all_gather_data_parallel")
 
 
 @register_mappings_test
 def test_scatter_tensor_parallel():
-    dist.init_process_group("nccl")
+    utils.init_process_group()
 
     model = nn.Linear(2, 4)
     fmps = fm_dist.initialize_distributed_state(model, _NUM_GPUS, 1, 1)
 
     tensor_to_scatter = torch.arange(
-        fm_dist.get_tensor_parallel_world_size()
+        fmps.get_tensor_parallel_world_size()
     ).cuda()
     result = fm_dist.scatter_tensor_parallel(tensor_to_scatter, 0, fmps)
     assert torch.equal(
         result,
-        torch.ones((1)).cuda() * fm_dist.get_tensor_parallel_rank(),
+        torch.ones((1)).cuda() * fmps.get_tensor_parallel_rank(),
     )
-
-    dist.destroy_process_group()
+    utils.print_success("test_scatter_tensor_parallel")
 
 
 @register_mappings_test
 def test_scatter_data_parallel():
-    dist.init_process_group("nccl")
+    utils.init_process_group()
 
     model = nn.Linear(2, 4)
     fmps = fm_dist.initialize_distributed_state(model, 1, 1, _NUM_GPUS)
 
-    tensor_to_scatter = torch.arange(
-        fm_dist.get_data_parallel_world_size()
-    ).cuda()
+    tensor_to_scatter = torch.arange(fmps.get_data_parallel_world_size()).cuda()
     result = fm_dist.scatter_data_parallel(tensor_to_scatter, 0, fmps)
     assert torch.equal(
         result,
-        torch.ones((1)).cuda() * fm_dist.get_data_parallel_rank(),
+        torch.ones((1)).cuda() * fmps.get_data_parallel_rank(),
     )
-
-    dist.destroy_process_group()
+    utils.print_success("test_scatter_data_parallel")
 
 
 @register_mappings_test
 def test_batch_isend_irecv_pipeline_parallel():
-    dist.init_process_group("nccl")
+    utils.init_process_group()
 
     model = nn.Linear(2, 4)
     fmps = fm_dist.initialize_distributed_state(model, 1, _NUM_GPUS, 1)
@@ -158,13 +148,12 @@ def test_batch_isend_irecv_pipeline_parallel():
             tensor,
             torch.ones((1,)).cuda() * (rank + 1) % world_size,
         )
-
-    dist.destroy_process_group()
+    utils.print_success("test_batch_isend_irecv_pipeline_parallel")
 
 
 @register_mappings_test
 def test_gather_pipeline_parallel_base():
-    dist.init_process_group("nccl")
+    utils.init_process_group()
 
     model = nn.Linear(2, 4)
     fmps = fm_dist.initialize_distributed_state(model, 1, _NUM_GPUS, 1)
@@ -193,13 +182,12 @@ def test_gather_pipeline_parallel_base():
                 result[f"tensor_{tensor_idx}"],
                 torch.ones((1,)) * tensor_idx,
             )
-
-    dist.destroy_process_group()
+    utils.print_success("test_gather_pipeline_parallel_base")
 
 
 @register_mappings_test
 def test_gather_pipeline_parallel_dtypes():
-    dist.init_process_group("nccl")
+    utils.init_process_group()
 
     model = nn.Linear(2, 4)
     fmps = fm_dist.initialize_distributed_state(model, 1, _NUM_GPUS, 1)
@@ -230,5 +218,4 @@ def test_gather_pipeline_parallel_dtypes():
                     result[name],
                     tensor,
                 )
-
-    dist.init_process_group()
+    utils.print_success("test_gather_pipeline_parallel_dtypes")

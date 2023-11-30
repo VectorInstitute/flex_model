@@ -2,7 +2,6 @@ import logging
 from dataclasses import dataclass, asdict, fields
 import pprint
 from typing import List, Optional, Dict
-import weakref
 
 import torch
 import torch.nn as nn
@@ -317,6 +316,7 @@ def _set_global_state(model, model_to_state_map_entry):
 def _destroy_global_state():
     global _GLOBAL_PARALLEL_STATE
     _GLOBAL_PARALLEL_STATE = None
+    dist.barrier()
 
 
 def initialize_distributed_state(
@@ -345,8 +345,16 @@ def initialize_distributed_state(
     assert (
         dist.is_initialized()
     ), "Please call `torch.distributed.init_process_group()`"
-    assert dist.get_world_size(group=process_group) == (
+    group_world_size = dist.get_world_size(group=process_group)
+    req_world_size = (
         tensor_parallel_size * pipeline_parallel_size * data_parallel_size
+    )
+    assert group_world_size == req_world_size, (
+        f"Default process group ({group_world_size} ranks) was provided, "
+        f"but parallelism axes result in less/more than requested processes "
+        f"({req_world_size} ranks). If you are initializing using a subset of "
+        f"the default process group, please create a new group using "
+        f"`torch.distributed.new_group(ranks)`"
     )
     # Global world view: [0, 1, 2, 3, 4, 5, 6, 7]
     # Subset world view: [2, 3, 6, 7]
@@ -359,6 +367,7 @@ def initialize_distributed_state(
     if process_group is None:  # subset is entire world
         subset_world_view = list(range(dist.get_world_size()))
     else:
+        # `dist.get_process_group_ranks` is always wrt default pg.
         subset_world_view = dist.get_process_group_ranks(group=process_group)
 
     local_world_view = list(range(len(subset_world_view)))
@@ -386,7 +395,7 @@ def initialize_distributed_state(
     )
 
     # Get device rank assignment in each world view.
-    subset_rank = dist.get_rank(group=process_group)
+    subset_rank = dist.get_rank(group=None)
     local_rank = subset_to_local_view_map[subset_rank]
     logger.debug(
         f"Rank assignment: subset[{subset_rank}] - local[{local_rank}]"
@@ -437,6 +446,7 @@ def _finalize_local_parallel_state_api(model_reference):
         _destroy_global_state()
 
     logger.debug("Local parallel state api finalized")
+    dist.barrier()
 
 
 class _LocalParallelStateAPI:
@@ -449,11 +459,17 @@ class _LocalParallelStateAPI:
         ]
         self.ls = self.model_entry["local_parallel_state"]
 
+        # TODO: Finalizer runs before gc which may cause global parallel state
+        #       to die even if a local parallel state is being created. Should
+        #       we register global state instances with hashes? Or could just
+        #       not destroy it until program death.
+        """
         self._finalizer = weakref.finalize(
             self,
             _finalize_local_parallel_state_api,
             self.model_reference,
         )
+        """
 
     def get_local_process_group(self) -> int:
         return self.ls.local_process_group
