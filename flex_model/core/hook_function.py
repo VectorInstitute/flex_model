@@ -3,7 +3,6 @@ from argparse import Namespace
 from functools import partial
 from typing import Any, Callable, Optional, Tuple, Union
 
-import torch
 import torch.nn as nn
 from torch import Tensor
 
@@ -199,7 +198,6 @@ class HookFunction:
     ) -> Tensor:
         """Runs a hook function for editing tensor gradients."""
         # No module since this is tensor-level.
-        torch.cuda.synchronize()
         outputs = self._apply(grad)
         return outputs
 

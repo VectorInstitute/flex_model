@@ -15,7 +15,6 @@ register_wrapper_test, get_wrapper_test = make_test_registry(
 )
 
 
-MODEL_NAME = "test_model"
 MODULE_NAME = "fc1"
 MODULE_SHAPE = None
 FSDP_WRAP_LAYER = torch.nn.Linear

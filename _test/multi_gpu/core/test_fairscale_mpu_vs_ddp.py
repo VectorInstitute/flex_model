@@ -99,7 +99,6 @@ def _run_ddp_model(register_fn, acc, run_backward=False):
     # DDP model.
     ddp_model = utils.wrap_ddp(model, pg=mpu.get_data_parallel_group())
 
-    # Need new pg or else FlexModel will use whole world
     fm_ddp_model = FlexModel(
         ddp_model, acc, data_parallel_size=dist.get_world_size()
     )

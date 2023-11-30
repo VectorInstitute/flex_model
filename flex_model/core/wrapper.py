@@ -21,10 +21,11 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from flex_model.utils import setup_logger
 import flex_model.distributed as fm_dist
-from flex_model.distributed.distributed_state import _LocalParallelStateAPI
+from flex_model.distributed.distributed_state import _ParallelStateAPI
 
 from .hook_function import HookFunction
 
@@ -55,7 +56,7 @@ def _get_module(root_module: nn.Module, tgt_module_name: str) -> nn.Module:
 
 @dataclass
 class _SharedState:
-    fmps: _LocalParallelStateAPI
+    fmps: _ParallelStateAPI
     output_ptr: Dict[str, List[Tensor]]
     save_ctx: Namespace
     modules: nn.ModuleDict
@@ -500,9 +501,13 @@ class FlexModel(nn.Module):
         # TODO: If using DDP, need to call our own all-reduce manually since
         #       we can't rely on hook execution order.
         if hook_type == "tensor":
-            if isinstance(self.module, FSDP):  # , DDP)):
+            if isinstance(self.module, (FSDP, DDP)):
                 raise NotImplementedError(
-                    "Pytorch FSDP/DDP is currently not supported for parameter/grad-level hook functions, ie. `register_hook(Tensor)`. We cannot currently guarantee tensor hook execution order or parameter buffer access with FSDP/DDP"
+                    "Pytorch FSDP/DDP is currently not supported for "
+                    "parameter/grad-level hook functions, ie. "
+                    "`register_hook(Tensor)`. We cannot currently guarantee "
+                    "tensor hook execution order or parameter buffer access "
+                    "with FSDP/DDP"
                 )
         assert (
             hook_type in self._hook_type_to_pt_attr
@@ -732,9 +737,11 @@ class FlexModel(nn.Module):
     def named_parameters(
         self, *args, **kwargs
     ) -> Iterator[Tuple[str, nn.Parameter]]:
+        """Get the parameter and name for all parameters in the module."""
         return self.module.named_parameters(*args, **kwargs)
 
     def named_buffers(self, *args, **kwargs) -> Iterator[Tuple[str, Tensor]]:
+        """Get the buffer and name for all buffers in the module."""
         return self.module.named_buffers(*args, **kwargs)
 
     def restore(self) -> nn.Module:

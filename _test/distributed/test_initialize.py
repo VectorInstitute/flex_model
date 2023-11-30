@@ -1,4 +1,4 @@
-from flex_model.distributed.distributed_state import GPUDeviceMesh
+from flex_model.distributed.distributed_state import _BaseGPUDeviceMesh
 
 
 def test_GPUDeviceMesh():
@@ -20,7 +20,7 @@ def test_GPUDeviceMesh():
         tp = case[0]
         pp = case[1]
         dp = case[2]
-        gpu_device_mesh = GPUDeviceMesh.build(tp, pp, dp)
+        gpu_device_mesh = _BaseGPUDeviceMesh(tp, pp, dp)
         assert gpu_device_mesh.tp_group_ranks == solution[0], f"{case}"
         assert gpu_device_mesh.pp_group_ranks == solution[1], f"{case}"
         assert gpu_device_mesh.dp_group_ranks == solution[2], f"{case}"

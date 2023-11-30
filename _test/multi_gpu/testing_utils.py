@@ -69,11 +69,6 @@ def all_gather(tensor: Tensor, dim: int = 0, pg=None):
     return torch.cat(tensor_list, dim=dim)
 
 
-def all_reduce(tensor, pg=None):
-    dist.all_reduce(tensor, group=pg)
-    return tensor
-
-
 class TestModel(nn.Module):
     def __init__(self, device="cuda", dtype=torch.float32):
         super().__init__()
@@ -254,7 +249,9 @@ class TestFairscaleModel(nn.Module):
         return out_2
 
 
-def assert_same_state(self_states, other_states) -> None:
+def assert_same_state(
+    self_states: Dict[str, Tensor], other_states: Dict[str, Tensor]
+) -> None:
     """Check if self and other have the same parameter and gradient states."""
     self_params, self_grads = self_states
     other_params, other_grads = other_states

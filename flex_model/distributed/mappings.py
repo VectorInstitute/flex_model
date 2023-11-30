@@ -5,7 +5,7 @@ import torch
 from torch.distributed import ProcessGroup
 from torch import Tensor
 
-from flex_model.distributed.distributed_state import _LocalParallelStateAPI
+from flex_model.distributed.distributed_state import _ParallelStateAPI
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +16,11 @@ def _log_shape(rank, fn_name, in_shape, out_shape):
     )
 
 
-def unity(tensor: Tensor, fmps: _LocalParallelStateAPI) -> Tensor:
+def unity(tensor: Tensor, fmps: _ParallelStateAPI) -> Tensor:
     """No-op function.
 
     :param Tensor tensor: Activation tensor.
-    :param _LocalParallelStateAPI fmps: FlexModel parallel state handle.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
     :returns: Input tensor unmodified.
     :rtype: Tensor
@@ -52,12 +52,12 @@ def _core_broadcast(
 
 
 def broadcast_tensor_parallel(
-    tensor: Tensor, fmps: _LocalParallelStateAPI
+    tensor: Tensor, fmps: _ParallelStateAPI
 ) -> Tensor:
     """Broadcast tensor to all ranks in the tensor parallel group.
 
     :param Tensor tensor: Activation tensor.
-    :param _LocalParallelStateAPI fmps: FlexModel parallel state handle.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
     :returns: Input tensor unmodified.
     :rtype: Tensor
@@ -68,13 +68,11 @@ def broadcast_tensor_parallel(
     return _core_broadcast(tensor, group, rank, world_size)
 
 
-def broadcast_data_parallel(
-    tensor: Tensor, fmps: _LocalParallelStateAPI
-) -> Tensor:
+def broadcast_data_parallel(tensor: Tensor, fmps: _ParallelStateAPI) -> Tensor:
     """Broadcast tensor to all ranks in the data parallel group.
 
     :param Tensor tensor: Activation tensor.
-    :param _LocalParallelStateAPI fmps: FlexModel parallel state handle.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
     :returns: Input tensor unmodified.
     :rtype: Tensor
@@ -115,12 +113,12 @@ def _core_all_gather(
 
 
 def all_gather_tensor_parallel(
-    tensor: Tensor, dim: int, fmps: _LocalParallelStateAPI
+    tensor: Tensor, dim: int, fmps: _ParallelStateAPI
 ) -> Tensor:
     """All-to-all gather tensors from ranks in the tensor parallel group.
 
     :param Tensor tensor: Activation tensor.
-    :param _LocalParallelStateAPI fmps: FlexModel parallel state handle.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
     :returns: Input tensor unmodified.
     :rtype: Tensor
@@ -132,12 +130,12 @@ def all_gather_tensor_parallel(
 
 
 def all_gather_data_parallel(
-    tensor: Tensor, dim: int, fmps: _LocalParallelStateAPI
+    tensor: Tensor, dim: int, fmps: _ParallelStateAPI
 ) -> Tensor:
     """All-to-all gather tensors from ranks in the data parallel group.
 
     :param Tensor tensor: Activation tensor.
-    :param _LocalParallelStateAPI fmps: FlexModel parallel state handle.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
     :returns: Input tensor unmodified.
     :rtype: Tensor
@@ -166,12 +164,12 @@ def _core_scatter(
 
 
 def scatter_tensor_parallel(
-    tensor: Tensor, dim: int, fmps: _LocalParallelStateAPI
+    tensor: Tensor, dim: int, fmps: _ParallelStateAPI
 ) -> Tensor:
     """Scatter tensors to ranks in the tensor parallel group.
 
     :param Tensor tensor: Activation tensor.
-    :param _LocalParallelStateAPI fmps: FlexModel parallel state handle.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
     :returns: Input tensor unmodified.
     :rtype: Tensor
@@ -183,12 +181,12 @@ def scatter_tensor_parallel(
 
 
 def scatter_data_parallel(
-    tensor: Tensor, dim: int, fmps: _LocalParallelStateAPI
+    tensor: Tensor, dim: int, fmps: _ParallelStateAPI
 ) -> Tensor:
     """Scatter tensors to ranks in the data parallel group.
 
     :param Tensor tensor: Activation tensor.
-    :param _LocalParallelStateAPI fmps: FlexModel parallel state handle.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
     :returns: Input tensor unmodified.
     :rtype: Tensor
@@ -230,7 +228,7 @@ _TBUF_META = Dict[
 
 
 def _make_flat_buffer(
-    fmps: _LocalParallelStateAPI,
+    fmps: _ParallelStateAPI,
     tensor_dict: Dict[str, Tensor],
 ) -> Tuple[Optional[Tensor], Optional[_TBUF_META]]:
     tensors = []
@@ -264,7 +262,7 @@ def _make_flat_buffer(
 
 
 def _gather_pipeline_parallel(
-    fmps: _LocalParallelStateAPI,
+    fmps: _ParallelStateAPI,
     tbuf_groups: Dict[torch.dtype, Optional[Tensor]],
     all_metadata_groups: List[Optional[Dict[torch.dtype, _TBUF_META]]],
 ) -> Dict[str, Tensor]:
@@ -390,7 +388,7 @@ def _gather_pipeline_parallel(
 
 
 def batch_isend_irecv_pipeline_parallel(
-    fmps: _LocalParallelStateAPI,
+    fmps: _ParallelStateAPI,
     recv_tensors: List[Tensor],
     recv_from_ranks: List[int],
     send_tensors: List[Tensor],
@@ -460,7 +458,7 @@ def batch_isend_irecv_pipeline_parallel(
 
 
 def gather_pipeline_parallel_tensor_dicts(
-    fmps: _LocalParallelStateAPI,
+    fmps: _ParallelStateAPI,
     tensor_dict: Dict[str, Tensor],
 ) -> Dict[str, Tensor]:
     """Gather groups of tensors from ranks of the pipeline group to pipeline rank0.
@@ -468,7 +466,7 @@ def gather_pipeline_parallel_tensor_dicts(
     Note: Assumes input tensors are on CPU and placed output tensors on CPU.
     - This behaviour is subject to change depending on various optimizations.
 
-    :param _LocalParallelStateAPI fmps: FlexModel parallel state handle.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
     :param tensor_dict: Some python object that can be pickled. May contain tensors.
     :type tensor_dict Dict[str, Tensor]:
 

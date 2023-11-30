@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, List, Optional
 from torch import Tensor
 
 import flex_model.distributed as fm_dist
-from flex_model.distributed.distributed_state import _LocalParallelStateAPI
+from flex_model.distributed.distributed_state import _ParallelStateAPI
 
 """
 We define strategies for:
@@ -46,7 +46,7 @@ class ParameterTensorParallelRoutingStrategy(BaseRoutingStrategy):
 
     @classmethod
     def initialize(
-        cls, fmps: _LocalParallelStateAPI, tensor: Tensor, expected_shape
+        cls, fmps: _ParallelStateAPI, tensor: Tensor, expected_shape
     ) -> None:
         # Handle unspecified dimensions.
         input_shape = tensor.shape
@@ -105,7 +105,7 @@ class ActivationTensorAllToAllRoutingStrategy(BaseRoutingStrategy):
     @classmethod
     def initialize(
         cls,
-        fmps: _LocalParallelStateAPI,
+        fmps: _ParallelStateAPI,
         tensor: Optional[Tensor],
         expected_shape,
     ) -> None:
