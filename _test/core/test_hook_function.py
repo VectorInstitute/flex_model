@@ -1,6 +1,7 @@
 from functools import reduce
 
 import torch
+import torch.distributed as dist
 
 from flex_model.core import FlexModel, HookFunction
 
@@ -19,6 +20,7 @@ def rgetattr(module, attr):
 
 
 def test_forward_hooks(make_opt_350m):
+    dist.init_process_group("nccl")
     model = make_opt_350m().eval().cuda()
 
     inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
@@ -48,9 +50,11 @@ def test_forward_hooks(make_opt_350m):
 
     torch.testing.assert_close(gt_retval, fm_retval)
     torch.testing.assert_close(acc["torch"], acc[MODULE_NAME][0])
+    dist.destroy_process_group()
 
 
 def test_full_backward_hooks(make_opt_350m):
+    dist.init_process_group("nccl")
     inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
 
     acc = {}
@@ -91,8 +95,11 @@ def test_full_backward_hooks(make_opt_350m):
         assert gt_name == fm_name
         torch.testing.assert_close(gt_grad, fm_grad)
 
+    dist.destroy_process_group()
+
 
 def test_tensor_hooks(make_opt_350m):
+    dist.init_process_group("nccl")
     inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
 
     acc = {}
@@ -132,8 +139,11 @@ def test_tensor_hooks(make_opt_350m):
         assert gt_name == fm_name
         torch.testing.assert_close(gt_grad, fm_grad)
 
+    dist.destroy_process_group()
+
 
 def test_forward_pre_hooks(make_opt_350m):
+    dist.init_process_group("nccl")
     model = make_opt_350m().eval().cuda()
 
     inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
@@ -165,8 +175,11 @@ def test_forward_pre_hooks(make_opt_350m):
     torch.testing.assert_close(gt_retval, fm_retval)
     torch.testing.assert_close(acc["torch"], acc[MODULE_NAME][0])
 
+    dist.destroy_process_group()
+
 
 def test_full_backward_pre_hooks(make_opt_350m):
+    dist.init_process_group("nccl")
     inputs = torch.randint(0, 6400, size=(4, 32)).cuda()
 
     acc = {}
@@ -206,3 +219,5 @@ def test_full_backward_pre_hooks(make_opt_350m):
     ):
         assert gt_name == fm_name
         torch.testing.assert_close(gt_grad, fm_grad)
+
+    dist.destroy_process_group()

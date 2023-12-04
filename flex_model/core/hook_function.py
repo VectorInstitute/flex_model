@@ -6,7 +6,7 @@ from typing import Any, Callable, Optional, Tuple, Union
 import torch.nn as nn
 from torch import Tensor
 
-import flex_model.distributed as dist
+import flex_model.distributed as fm_dist
 from flex_model.traverse import (
     InternalObject,
     LeafObject,
@@ -153,9 +153,11 @@ class HookFunction:
         self.module = None  # Safe to cache this state, never changes.
 
         # Default strategies, initialized once at first runtime.
-        self.routing_strategy = dist.ActivationTensorAllToAllRoutingStrategy
-        self.offload_strategy = dist.CPUPinnedMemoryOffloadStrategy
-        self.function_strategy = dist.NonValidatedFunctionStrategy
+        # TODO: These should be bound when self is registered to a
+        #       FlexModel instance.
+        self.routing_strategy = fm_dist.ActivationTensorAllToAllRoutingStrategy
+        self.offload_strategy = fm_dist.CPUPinnedMemoryOffloadStrategy
+        self.function_strategy = fm_dist.NonValidatedFunctionStrategy
 
         # Valid hook function implementations.
         self.hook_type_to_impl_fn = {
@@ -221,15 +223,19 @@ class HookFunction:
         outputs = self._peel_and_apply(grad_outputs)
         return outputs
 
-    def _apply(self, tensor: Tensor) -> Tensor:
+    def _apply(self, tensor: Optional[Tensor]) -> Tensor:
         """Template function for editing a sharded activation tensor.
 
         This function is used alone in cases where hook functions operate
         directly on a tensor, and not an entire module.
         """
-        if not isinstance(self.routing_strategy, dist.BaseRoutingStrategy):
+        # Runtime initialization of strategies.
+        # TODO: Only routing strategies need to be init at first iteration.
+        if not isinstance(self.routing_strategy, fm_dist.BaseRoutingStrategy):
             self.routing_strategy = self.routing_strategy.initialize(
-                tensor, self.expected_shape
+                self._shared_state.fmps,
+                tensor,
+                self.expected_shape,
             )
             self.offload_strategy = self.offload_strategy.initialize(
                 self.module_name, self._shared_state.output_ptr
@@ -238,8 +244,19 @@ class HookFunction:
                 self.editing_function
             )
 
+        if tensor is None:
+            return
+
         start_shape = tensor.shape
         tensor = self.routing_strategy.execute_prologue(tensor)
+
+        # Need to pre-divide activation grads by dp world size, see:
+        # https://yi-wang-2005.medium.com/pytorch-distributeddataparallel-internals-c01c30a41192.
+        if self._hook_type in ["full_backward", "full_backward_pre"]:
+            tensor = (
+                tensor / self._shared_state.fmps.get_data_parallel_world_size()
+            )
+
         self.offload_strategy.execute(tensor)
         tensor = self.function_strategy.execute(
             self.module,
@@ -247,6 +264,12 @@ class HookFunction:
             self._shared_state.save_ctx,
             self._shared_state.modules,
         )
+
+        if self._hook_type in ["full_backward", "full_backward_pre"]:
+            tensor = (
+                tensor * self._shared_state.fmps.get_data_parallel_world_size()
+            )
+
         tensor = self.routing_strategy.execute_epilogue(tensor)
         end_shape = tensor.shape
 
@@ -285,12 +308,18 @@ class HookFunction:
         """
         treedef, leaves = flatten(outputs)
 
-        left_leaves, tensor, right_leaves = (
-            leaves[: self.unpack_idx],
-            leaves[self.unpack_idx],
-            leaves[self.unpack_idx + 1 :],
-        )
-        assert tensor is not None
+        if len(leaves) == 0:
+            logger.debug(
+                "Unpacked tensor is None, nothing to operate on "
+                "(input activation grad is likely None)"
+            )
+            left_leaves, tensor, right_leaves = [], None, []
+        else:
+            left_leaves, tensor, right_leaves = (
+                leaves[: self.unpack_idx],
+                leaves[self.unpack_idx],
+                leaves[self.unpack_idx + 1 :],
+            )
 
         def _repack(_edited_tensor) -> LayerOutputs:
             """Pack activation tensor back into layer output container."""

@@ -2,252 +2,199 @@ import logging
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
+from torch.distributed import ProcessGroup
 from torch import Tensor
 
-import flex_model.distributed as fm_dist
+from flex_model.distributed.distributed_state import _ParallelStateAPI
 
 logger = logging.getLogger(__name__)
 
 
-def _log_shape(fn_name, in_shape, out_shape):
-    logger.debug(f"{fn_name}\t|\tInput:\t{in_shape} -> {out_shape}")
+def _log_shape(rank, fn_name, in_shape, out_shape):
+    logger.debug(
+        f"Local rank{rank} - {fn_name} | Input: {in_shape} -> {out_shape}"
+    )
 
 
-def unity(tensor: Tensor) -> Tensor:
+def unity(tensor: Tensor, fmps: _ParallelStateAPI) -> Tensor:
     """No-op function.
 
     :param Tensor tensor: Activation tensor.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
     :returns: Input tensor unmodified.
     :rtype: Tensor
     """
-    _log_shape("unity", tensor.shape, tensor.shape)
+    rank = fmps.get_local_rank()
+    _log_shape(rank, "unity", tensor.shape, tensor.shape)
 
     return tensor
 
 
-def broadcast_tensor_parallel(tensor: Tensor) -> Tensor:
-    """Send a copy of the tensor to all members of the tensor parallel group.
-
-    :param Tensor tensor: Tensor to broadcast.
-
-    :returns: All tensor parallel ranks will get the same tensor.
-    :rtype: Tensor
-    """
+def _core_broadcast(
+    tensor: Tensor, pg: ProcessGroup, rank: int, world_size: int
+) -> Tensor:
     in_shape = tensor.shape
-    tp_world_size = fm_dist.get_tensor_parallel_world_size()
-    tp_group = fm_dist.get_tensor_parallel_group()
 
-    if tp_world_size == 1:
-        _log_shape("broadcast_tensor_parallel", in_shape, tensor.shape)
+    if world_size == 1:
+        _log_shape(rank, "_core_broadcast", in_shape, tensor.shape)
         return tensor
 
     # We only interact among tensor parallel group to bcast
     torch.distributed.broadcast(
         tensor=tensor,
         src=0,
-        group=tp_group,
+        group=pg,
         async_op=False,
     )
-
-    _log_shape("broadcast_tensor_parallel", in_shape, tensor.shape)
-
+    _log_shape(rank, "_core_broadcast", in_shape, tensor.shape)
     return tensor
 
 
-def broadcast_data_parallel(tensor: Tensor) -> Tensor:
-    """Send a copy of the data to all members of the data parallel group.
+def broadcast_tensor_parallel(
+    tensor: Tensor, fmps: _ParallelStateAPI
+) -> Tensor:
+    """Broadcast tensor to all ranks in the tensor parallel group.
 
-    :param Tensor tensor: Tensor to broadcast.
+    :param Tensor tensor: Activation tensor.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
-    :returns: All data parallel ranks will get the same tensor.
+    :returns: Input tensor unmodified.
     :rtype: Tensor
     """
-    in_shape = tensor.shape
-    dp_world_size = fm_dist.get_data_parallel_world_size()
-    dp_group = fm_dist.get_data_parallel_group()
-
-    if dp_world_size == 1:
-        _log_shape("broadcast_data_parallel", in_shape, tensor.shape)
-        return tensor
-
-    # We only interact among tensor parallel group to bcast
-    torch.distributed.broadcast(
-        tensor=tensor,
-        src=0,
-        group=dp_group,
-        async_op=False,
-    )
-
-    _log_shape("broadcast_data_parallel", in_shape, tensor.shape)
-
-    return tensor
+    group = fmps.get_tensor_parallel_group()
+    rank = fmps.get_tensor_parallel_rank()
+    world_size = fmps.get_tensor_parallel_world_size()
+    return _core_broadcast(tensor, group, rank, world_size)
 
 
-def all_gather_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
-    """Gather all tensors from tensor parallel group to each device in group.
+def broadcast_data_parallel(tensor: Tensor, fmps: _ParallelStateAPI) -> Tensor:
+    """Broadcast tensor to all ranks in the data parallel group.
 
-    Each device in the tensor parallel group has a tensor, and every tensor
-    will be sent to all other members of the tensor parallel group. For
-    example, if gpu0 has T0 and gpu1 has T1, then after this operation gpu0
-    will have [T0, T1] and gpu1 will also have [T0, T1]. A concatenation is
-    done after the communication to generate a single tensor.
+    :param Tensor tensor: Activation tensor.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
-    :param Tensor tensor: Tensor to all-gather.
-    :param int dim: Dimension to concatenate the gathered tensors along.
-
-    :returns: The gathered and concatenated tensor.
+    :returns: Input tensor unmodified.
     :rtype: Tensor
     """
-    in_shape = tensor.shape
-    tp_world_size = fm_dist.get_tensor_parallel_world_size()
-    tp_rank = fm_dist.get_tensor_parallel_rank()
-    tp_group = fm_dist.get_tensor_parallel_group()
-
-    if tp_world_size == 1:
-        _log_shape("all_gather_tensor_parallel", in_shape, tensor.shape)
-        return tensor
-
-    tensor_list = [torch.empty_like(tensor) for _ in range(tp_world_size)]
-    tensor_list[tp_rank] = tensor
-
-    torch.distributed.all_gather(
-        tensor_list,
-        tensor,
-        group=tp_group,
-        async_op=False,
-    )
-
-    output_tensor = torch.cat(tensor_list, dim=dim)
-
-    _log_shape("all_gather_tensor_parallel", in_shape, output_tensor.shape)
-
-    return output_tensor
+    group = fmps.get_data_parallel_group()
+    rank = fmps.get_data_parallel_rank()
+    world_size = fmps.get_data_parallel_world_size()
+    return _core_broadcast(tensor, group, rank, world_size)
 
 
-def all_gather_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
-    """Gather all tensors from data parallel group to each device in group.
-
-    Each device in the data parallel group has a tensor, and every tensor
-    will be sent to all other members of the data parallel group. For
-    example, if gpu0 has T0 and gpu1 has T1, then after this operation gpu0
-    will have [T0, T1] and gpu1 will also have [T0, T1]. A concatenation is
-    done after the communication to generate a single tensor.
-
-    :param Tensor tensor: Tensor to all-gather.
-    :param int dim: Dimension to concatenate the gathered tensors along.
-
-    :returns: The gathered and concatenated tensor.
-    :rtype: Tensor
-    """
+def _core_all_gather(
+    tensor: Tensor, dim: int, group: ProcessGroup, rank: int, world_size: int
+):
     in_shape = tensor.shape
 
-    dp_world_size = fm_dist.get_data_parallel_world_size()
-    dp_rank = fm_dist.get_data_parallel_rank()
-    dp_group = fm_dist.get_data_parallel_group()
-
-    if dp_world_size == 1:
-        _log_shape("all_gather_data_parallel", in_shape, tensor.shape)
-        return tensor
-
-    tensor_list = [torch.empty_like(tensor) for _ in range(dp_world_size)]
-    tensor_list[dp_rank] = tensor
-
-    torch.distributed.all_gather(
-        tensor_list,
-        tensor,
-        group=dp_group,
-        async_op=False,
-    )
-
-    output_tensor = torch.cat(tensor_list, dim=dim)
-
-    _log_shape("all_gather_data_parallel", in_shape, output_tensor.shape)
-
-    return output_tensor
-
-
-def _all_reduce_tensor_parallel(tensor: Tensor) -> Tensor:
-    """Unused."""
-    tp_world_size = fm_dist.get_tensor_parallel_world_size()
-    tp_group = fm_dist.get_tensor_parallel_group()
-
-    if tp_world_size == 1:
-        return tensor
-
+    # Clone here to prevent in-place exceptions.
     tensor = tensor.clone()
-    torch.distributed.all_reduce(
+
+    if world_size == 1:
+        _log_shape(rank, "_core_all_gather", in_shape, tensor.shape)
+        return tensor
+
+    tensor_list = [torch.empty_like(tensor) for _ in range(world_size)]
+    tensor_list[rank] = tensor
+
+    torch.distributed.all_gather(
+        tensor_list,
         tensor,
-        op=torch.distributed.ReduceOp.SUM,
-        group=tp_group,
+        group=group,
         async_op=False,
     )
 
-    return tensor
+    output_tensor = torch.cat(tensor_list, dim=dim)
 
-
-def scatter_tensor_parallel(tensor: Tensor, dim: int = -1) -> Tensor:
-    """Chunk a tensor and send chunks to corresponding tensor parallel ranks.
-
-    Given a tensor, chunk it along a specific dimension. Each device rank will
-    get the corresponding tensor chunk. For example, T = [T0, T1], where gpu0
-    will get T0 and gpu1 will get T1. Notably, the scatter functions are always
-    used after all-gather functions. Hence each rank has a full copy of the
-    tensor T, so each rank instead discards all chunks besides their own
-    corresponding chunk.
-
-    :param Tensor tensor: Tensor to scatter.
-    :param int dim: Dimension to chunk the tensor along.
-
-    :returns: The corresponding chunk of the full tensor.
-    :rtype: Tensor
-    """
-    in_shape = tensor.shape
-    tp_world_size = fm_dist.get_tensor_parallel_world_size()
-    tp_rank = fm_dist.get_tensor_parallel_rank()
-
-    if tp_world_size == 1:
-        _log_shape("scatter_tensor_parallel", in_shape, tensor.shape)
-        return tensor
-
-    input_list = torch.chunk(tensor, tp_world_size, dim=dim)
-    output_tensor = input_list[tp_rank].contiguous()
-
-    _log_shape("scatter_tensor_parallel", in_shape, output_tensor.shape)
+    _log_shape(rank, "_core_all_gather", in_shape, output_tensor.shape)
 
     return output_tensor
 
 
-def scatter_data_parallel(tensor: Tensor, dim: int = 0) -> Tensor:
-    """Chunk a tensor and send chunks to corresponding data parallel ranks.
+def all_gather_tensor_parallel(
+    tensor: Tensor, dim: int, fmps: _ParallelStateAPI
+) -> Tensor:
+    """All-to-all gather tensors from ranks in the tensor parallel group.
 
-    Given a tensor, chunk it along a specific dimension. Each device rank will
-    get the corresponding tensor chunk. For example, T = [T0, T1], where gpu0
-    will get T0 and gpu1 will get T1. Notably, the scatter functions are always
-    used after all-gather functions. Hence each rank has a full copy of the
-    tensor T, so each rank instead discards all chunks besides their own
-    corresponding chunk.
+    :param Tensor tensor: Activation tensor.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
 
-    :param Tensor tensor: Tensor to scatter.
-    :param int dim: Dimension to chunk the tensor along.
-
-    :returns: The corresponding chunk of the full tensor.
+    :returns: Input tensor unmodified.
     :rtype: Tensor
     """
-    in_shape = tensor.shape
-    dp_world_size = fm_dist.get_data_parallel_world_size()
-    dp_rank = fm_dist.get_data_parallel_rank()
+    group = fmps.get_tensor_parallel_group()
+    rank = fmps.get_tensor_parallel_rank()
+    world_size = fmps.get_tensor_parallel_world_size()
+    return _core_all_gather(tensor, dim, group, rank, world_size)
 
-    if dp_world_size == 1:
-        _log_shape("scatter_data_parallel", in_shape, tensor.shape)
+
+def all_gather_data_parallel(
+    tensor: Tensor, dim: int, fmps: _ParallelStateAPI
+) -> Tensor:
+    """All-to-all gather tensors from ranks in the data parallel group.
+
+    :param Tensor tensor: Activation tensor.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
+
+    :returns: Input tensor unmodified.
+    :rtype: Tensor
+    """
+    group = fmps.get_data_parallel_group()
+    rank = fmps.get_data_parallel_rank()
+    world_size = fmps.get_data_parallel_world_size()
+    return _core_all_gather(tensor, dim, group, rank, world_size)
+
+
+def _core_scatter(
+    tensor: Tensor, dim: int, group: ProcessGroup, rank: int, world_size: int
+):
+    in_shape = tensor.shape
+
+    if world_size == 1:
+        _log_shape(rank, "_core_scatter", in_shape, tensor.shape)
         return tensor
 
-    input_list = torch.chunk(tensor, dp_world_size, dim=dim)
-    output_tensor = input_list[dp_rank].contiguous()
+    input_list = torch.chunk(tensor, world_size, dim=dim)
+    output_tensor = input_list[rank].contiguous()
 
-    _log_shape("scatter_data_parallel", in_shape, output_tensor.shape)
+    _log_shape(rank, "_core_scatter", in_shape, output_tensor.shape)
 
     return output_tensor
+
+
+def scatter_tensor_parallel(
+    tensor: Tensor, dim: int, fmps: _ParallelStateAPI
+) -> Tensor:
+    """Scatter tensors to ranks in the tensor parallel group.
+
+    :param Tensor tensor: Activation tensor.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
+
+    :returns: Input tensor unmodified.
+    :rtype: Tensor
+    """
+    group = fmps.get_tensor_parallel_group()
+    rank = fmps.get_tensor_parallel_rank()
+    world_size = fmps.get_tensor_parallel_world_size()
+    return _core_scatter(tensor, dim, group, rank, world_size)
+
+
+def scatter_data_parallel(
+    tensor: Tensor, dim: int, fmps: _ParallelStateAPI
+) -> Tensor:
+    """Scatter tensors to ranks in the data parallel group.
+
+    :param Tensor tensor: Activation tensor.
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
+
+    :returns: Input tensor unmodified.
+    :rtype: Tensor
+    """
+    group = fmps.get_data_parallel_group()
+    rank = fmps.get_data_parallel_rank()
+    world_size = fmps.get_data_parallel_world_size()
+    return _core_scatter(tensor, dim, group, rank, world_size)
 
 
 def _group_by_dtype(
@@ -281,6 +228,7 @@ _TBUF_META = Dict[
 
 
 def _make_flat_buffer(
+    fmps: _ParallelStateAPI,
     tensor_dict: Dict[str, Tensor],
 ) -> Tuple[Optional[Tensor], Optional[_TBUF_META]]:
     tensors = []
@@ -303,7 +251,7 @@ def _make_flat_buffer(
     tensor_buffer = torch.cat(tensors)
 
     meta: _TBUF_META = {
-        "buffer_rank": fm_dist.get_pipeline_parallel_rank(),
+        "buffer_rank": fmps.get_pipeline_parallel_rank(),
         "buffer_size": tensor_buffer.numel(),
         "buffer_dtype": tensor_buffer.dtype,
         "name_to_index_map": name_to_index_map,
@@ -314,10 +262,11 @@ def _make_flat_buffer(
 
 
 def _gather_pipeline_parallel(
+    fmps: _ParallelStateAPI,
     tbuf_groups: Dict[torch.dtype, Optional[Tensor]],
     all_metadata_groups: List[Optional[Dict[torch.dtype, _TBUF_META]]],
 ) -> Dict[str, Tensor]:
-    rank = fm_dist.get_pipeline_parallel_rank()
+    rank = fmps.get_pipeline_parallel_rank()
 
     # Setup collections for communication
     def _empty_groups() -> Dict[torch.dtype, List[Union[Tensor, int]]]:
@@ -397,6 +346,7 @@ def _gather_pipeline_parallel(
         all_send_ranks.extend(send_rank_groups[dtype])
 
     batch_isend_irecv_pipeline_parallel(
+        fmps,
         all_recv_tbufs,
         all_recv_ranks,
         all_send_tbufs,
@@ -438,6 +388,7 @@ def _gather_pipeline_parallel(
 
 
 def batch_isend_irecv_pipeline_parallel(
+    fmps: _ParallelStateAPI,
     recv_tensors: List[Tensor],
     recv_from_ranks: List[int],
     send_tensors: List[Tensor],
@@ -450,8 +401,8 @@ def batch_isend_irecv_pipeline_parallel(
     :param List[Tensor] send_tensors: Tensors to send.
     :param List[int] send_to_ranks: Ranks to send to.
     """
-    rank = fm_dist.get_pipeline_parallel_rank()
-    group = fm_dist.get_pipeline_parallel_group()
+    rank = fmps.get_pipeline_parallel_rank()
+    group = fmps.get_pipeline_parallel_group()
 
     assert len(recv_tensors) == len(recv_from_ranks), (
         f"Mistmatch in recv tensors({len(recv_tensors)}) and "
@@ -507,13 +458,15 @@ def batch_isend_irecv_pipeline_parallel(
 
 
 def gather_pipeline_parallel_tensor_dicts(
-    tensor_dict: Dict[str, Tensor]
+    fmps: _ParallelStateAPI,
+    tensor_dict: Dict[str, Tensor],
 ) -> Dict[str, Tensor]:
     """Gather groups of tensors from ranks of the pipeline group to pipeline rank0.
 
     Note: Assumes input tensors are on CPU and placed output tensors on CPU.
     - This behaviour is subject to change depending on various optimizations.
 
+    :param _ParallelStateAPI fmps: FlexModel parallel state handle.
     :param tensor_dict: Some python object that can be pickled. May contain tensors.
     :type tensor_dict Dict[str, Tensor]:
 
@@ -524,9 +477,9 @@ def gather_pipeline_parallel_tensor_dicts(
     for tensor in tensor_dict.values():
         in_shapes.append(tensor.shape)
 
-    world_size = fm_dist.get_pipeline_parallel_world_size()
-    rank = fm_dist.get_pipeline_parallel_rank()
-    group = fm_dist.get_pipeline_parallel_group()
+    world_size = fmps.get_pipeline_parallel_world_size()
+    rank = fmps.get_pipeline_parallel_rank()
+    group = fmps.get_pipeline_parallel_group()
 
     tensor_dict_groups = _group_by_dtype(tensor_dict)
 
@@ -534,7 +487,7 @@ def gather_pipeline_parallel_tensor_dicts(
     tbuf_groups = {}
     metadata_groups = {}
     for dtype, tensor_dict in tensor_dict_groups.items():
-        tbuf, meta = _make_flat_buffer(tensor_dict)
+        tbuf, meta = _make_flat_buffer(fmps, tensor_dict)
 
         tbuf_groups[dtype] = tbuf
         metadata_groups[dtype] = meta
@@ -552,12 +505,15 @@ def gather_pipeline_parallel_tensor_dicts(
 
     # Communicate.
     output_tensor_dict = _gather_pipeline_parallel(
-        tbuf_groups, all_metadata_groups
+        fmps, tbuf_groups, all_metadata_groups
     )
 
     for in_shape, out_tensor in zip(in_shapes, output_tensor_dict.values()):
         _log_shape(
-            "gather_pipeline_parallel_tensor_dicts", in_shape, out_tensor.shape
+            rank,
+            "gather_pipeline_parallel_tensor_dicts",
+            in_shape,
+            out_tensor.shape,
         )
 
     return output_tensor_dict

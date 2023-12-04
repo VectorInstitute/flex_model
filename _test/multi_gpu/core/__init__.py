@@ -1,6 +1,13 @@
-from .test_fairscale_megatron import (
-    test_backward_hooks_FairscaleLayers,
-    test_FairscaleLayers,
-    test_forward_hooks_FairscaleLayers,
+from .test_fairscale_mpu_vs_ddp import (
+    test_fairscale,
+    test_forward_hooks_fairscale,
+    test_full_backward_hooks_fairscale,
+    test_forward_pre_hooks_fairscale,
+    test_full_backward_pre_hooks_fairscale,
 )
-from .test_fsdp import test_fsdp_llama
+from .test_dp_wrappers_vs_single_gpu import (
+    test_forward_hooks_wrapped,
+    test_full_backward_hooks_wrapped,
+    test_forward_pre_hooks_wrapped,
+    test_full_backward_pre_hooks_wrapped,
+)

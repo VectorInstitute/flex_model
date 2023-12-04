@@ -2,7 +2,7 @@
 [![Documentation Status](https://readthedocs.org/projects/flexmodel/badge/?version=latest)](https://flexmodel.readthedocs.io/en/latest/)
 
 ## Current WIPs
-* Adding more rigorous tess for hook function behaviours
+* ~~Adding more rigorous tess for hook function behaviours~~
 * Implement strategies for hanlding distributed `save_ctx` and `trainable_modules`
 * Visualizations of model architecture showing where hooks can be placed
 * Visualizations of model architecture showing where hooks are currently
@@ -12,7 +12,6 @@ located, and what groups they are tagged in
 * Remove the need to pass an `expected_shape`
 
 ## Introduction
-
 `FlexModel` is a tool designed for distributed interpretability of Large
 Language Models (LLMs). `FlexModel` allows you to retrieve and/or edit
 **unsharded** activations within your LLM (among other things).
@@ -59,6 +58,7 @@ hook function registration functions:
 * `nn.Module.register_forward_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_forward_hook)
 * `nn.Module.register_full_backward_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook)
 * `torch.Tensor.register_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.Tensor.register_hook.html#torch-tensor-register-hook)
+    * Note that this hook is not well-supported in the multi-gpu case, as parameter tensors are often custom-handled by frameworks like DDP/FSDP.
 * `nn.Module.register_forward_pre_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_forward_pre_hook)
 * `nn.Module.register_full_backward_pre_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_pre_hook)
 

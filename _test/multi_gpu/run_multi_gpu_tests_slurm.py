@@ -1,3 +1,4 @@
+import argparse
 import os
 from dataclasses import asdict
 
@@ -8,6 +9,13 @@ from _test.multi_gpu.registry import (
     get_multigpu_resource_specs,
     get_multigpu_test_registry,
 )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test_name", type=str)
+    args = parser.parse_args()
+    return args
 
 
 class TorchDistributedTestBatch:
@@ -96,40 +104,45 @@ class MultiGPUSlurmJob:
         return 0
 
 
-def main():
+def make_test_jobs(args):
+    """Makes the test jobs for launching via submitit.
+
+    First creates the `TorchDistributedTestBatch`, which is comprised of a
+    collection of test functions to run. Then creates the `MultiGPUSlurmJob`
+    using the `TorchDistributedTestBatch` and `SlurmJobResourceSpec`.
+    """
+    # Get test fuction registries and their respective resource specs.
+
+    test_registries = get_multigpu_test_registry()
+    test_resource_specs = get_multigpu_resource_specs()
+
+    slurm_jobs = {}
+    print("Created test batches:")
+    for test_reg_name, test_reg_fns in test_registries.items():
+        job = MultiGPUSlurmJob(
+            TorchDistributedTestBatch(test_reg_fns),
+            test_resource_specs[test_reg_name],
+        )
+
+        if args.test_name is None or args.test_name == test_reg_name:
+            print(f"{test_reg_name}: {job.test_batch}")
+            slurm_jobs[test_reg_name] = job
+
+    return slurm_jobs
+
+
+def main(args):
     # Import folders to register tests.
     from _test.multi_gpu import core, distributed  # noqa: F401
 
-    test_registries = get_multigpu_test_registry()
-
-    # Construct one test batch per test file.
-    # NOTE: Assumes that each test file has a single resource spec.
-    test_batches = {}
-    for test_reg_name, test_reg_fns in test_registries.items():
-        test_batches[test_reg_name] = TorchDistributedTestBatch(test_reg_fns)
-
-    print("Created test batches:")
-    for name, batch in test_batches.items():
-        print(f"{name}: {batch}")
-
-    # Construct one resource spec per test file.
-    test_resource_specs = get_multigpu_resource_specs()
-
-    # Construct slurm job by combining each test batch with corresponding
-    # resource spec.
-    test_slurm_jobs = {}
-    for test_batch_name in test_registries.keys():
-        assert test_batch_name in test_resource_specs
-        test_slurm_jobs[test_batch_name] = MultiGPUSlurmJob(
-            test_batches[test_batch_name],
-            test_resource_specs[test_batch_name],
-        )
+    jobs = make_test_jobs(args)
 
     # Run each job.
     # TODO: Launch all at once.
-    for job in test_slurm_jobs.values():
+    for job in jobs.values():
         job.run()
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)

@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from flex_model.core import FlexModel, HookFunction
+import _test.multi_gpu.testing_utils as utils
 
 MODULE_NAME_1 = "model.decoder.layers.17.fc2"
 MODULE_NAME_2 = "model.decoder.layers.18.fc2"
@@ -20,6 +21,7 @@ def test_register_forward_hook(make_opt_350m):
     Tests if a hook function is registered correctly, and if the fields are set
     appropriately.
     """
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -43,6 +45,7 @@ def test_register_trainable_module(make_opt_350m):
     functions (regardless of when they're added), have a pointer to this
     module.
     """
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -67,6 +70,7 @@ def test_register_trainable_module(make_opt_350m):
 
 
 def test_trainable_module_gradient(make_opt_350m):
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -105,6 +109,7 @@ def test_destroy(make_opt_350m):
     """
     Tests the destroy method to ensure everything is cleared appropriately.
     """
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -140,6 +145,7 @@ def test_destroy(make_opt_350m):
 
 
 def test_save_ctx(make_opt_350m, opt_tokenizer):
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     tokenizer = opt_tokenizer
@@ -193,6 +199,7 @@ def test_save_ctx(make_opt_350m, opt_tokenizer):
 
 
 def test_FlexModel_group_all(make_opt_350m):
+    utils.init_process_group()
     model = make_opt_350m().cuda()
 
     activations = {}
@@ -213,6 +220,7 @@ def test_FlexModel_group_all(make_opt_350m):
 
 
 def test_FlexModel_group_creation(make_opt_350m, opt_tokenizer):
+    utils.init_process_group()
     model = make_opt_350m().cuda()
     prompts = [
         "It's a nice day we're having",
