@@ -6,13 +6,12 @@
 __pycache__/
 .mypy_cache/
 
-*.egg-info/
-
 # Stubs and logs
 llama/
 *.logits
 *.log
 .ipynb_checkpoints/
+stubs/
 transformers/
 Megatron-LM/
 wandb/
@@ -33,3 +32,8 @@ docs/source/generated
 # Coverage
 .coverage
 coverage_html_report/
+
+# PIP builds
+dist/
+*.egg-info/
+build/

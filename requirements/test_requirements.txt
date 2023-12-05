@@ -1,0 +1,6 @@
+fairscale
+pytest
+sentencepiece
+submitit
+tokenizers
+transformers

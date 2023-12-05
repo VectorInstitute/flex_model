@@ -26,13 +26,6 @@ for model surgery and introspection.
    flex_model.traverse
 
 
-TODOs
------
-* Copy docs from :code:`TorchDistributedBackend` to the distributed API.
-* Support for backward hooks.
-* Finish tests for main codebase classes and functions.
-
-
 Indices and tables
 ==================
 

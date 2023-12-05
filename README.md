@@ -1,6 +1,16 @@
 # FlexModel
 [![Documentation Status](https://readthedocs.org/projects/flexmodel/badge/?version=latest)](https://flexmodel.readthedocs.io/en/latest/)
 
+# Installation
+
+## With pip
+Run the command: `pip install flex-model`.
+
+## From Source
+Clone the repository and run `pip install .` from the project directory. You
+can install other dependencies via the respective requirements file located in
+`requirements/`.
+
 ## Current WIPs
 * ~~Adding more rigorous tess for hook function behaviours~~
 * Implement strategies for hanlding distributed `save_ctx` and `trainable_modules`
@@ -61,12 +71,6 @@ hook function registration functions:
     * Note that this hook is not well-supported in the multi-gpu case, as parameter tensors are often custom-handled by frameworks like DDP/FSDP.
 * `nn.Module.register_forward_pre_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_forward_pre_hook)
 * `nn.Module.register_full_backward_pre_hook(...)`: [Usage](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_pre_hook)
-
-
-# Installation
-Run `pip install -e .` from the root directory. PyPi package coming soon with
-full release before Neurips 2023!
-
 
 # Usage
 Here's a short example on how you would use the FlexModel and HookFunction
