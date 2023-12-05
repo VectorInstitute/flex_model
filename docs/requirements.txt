@@ -1,0 +1,4 @@
+torch>=2.1
+pre-commit
+ruff
+sphinx-rtd-theme
