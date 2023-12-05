@@ -3,13 +3,13 @@
 
 # Installation
 
-## With pip
+## Using pip
 Run the command: `pip install flex-model`.
 
 ## From Source
-Clone the repository and run `pip install .` from the project directory. You
-can install other dependencies via the respective requirements file located in
-`requirements/`.
+Clone the repository and run `pip install .[all]` to install all dependencies.
+For more fine-grained options, you can install directly from the requirements
+files found in `requirements/`.
 
 ## Current WIPs
 * ~~Adding more rigorous tess for hook function behaviours~~
