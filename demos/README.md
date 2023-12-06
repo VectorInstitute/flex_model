@@ -25,7 +25,7 @@ class LlamaAttention(nn.Module):
         attn_weights = self.dummy(attn_weights)
         ...
 ```
-You may also need to change the module string literal under the `get_module_names` function.
+You may also need to change the module string literal under the `get_module_names` function. If you do not have safe tensors downloaded as part of your HF model, you will need to pass in `use_safetensors=False` as part of the model loading.
 
 To run the file, you can use `torchrun`. We have tested this demo by running Llama-2-70b-hf on 4x A100-80G.
 ```
