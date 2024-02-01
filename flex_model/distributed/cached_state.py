@@ -3,27 +3,24 @@ import logging
 
 import torch
 from torch import Tensor
-import torch.nn as nn
 
 from flex_model.distributed.distributed_state import _ParallelStateAPI
 from flex_model.distributed.mappings import _log_shape
 from flex_model.distributed.stratgies import (
     SaveCtxStrategy,
-    TrainableModulesStrategy,
 )
 
 logger = logging.getLogger(__name__)
 
 
 def _group_by_dtype(
-    tensor_dict: Dict[str, Tensor]
+    tensors: Dict[str, Tensor]
 ) -> Dict[torch.dtype, Dict[str, Tensor]]:
     dtypes = [torch.float32, torch.float16, torch.bfloat16]
-    dtype_groups: Dict[torch.dtype, Dict[str, Tensor]] = {
-        dtype: {} for dtype in dtypes
-    }
 
-    for name, tensor in tensor_dict.items():
+    dtype_groups = {dtype: {} for dtype in dtypes}
+
+    for name, tensor in tensors.items():
         assert tensor.dtype in dtype_groups, (
             f"Tensor with dtype: {tensor.dtype} is not supported for "
             f"gathering across PP ranks."
@@ -307,14 +304,13 @@ def gather_pipeline_parallel_tensor_dicts(
         tbuf_groups[dtype] = tbuf
         metadata_groups[dtype] = meta
 
-    # Gather metadata on rank 0 to setup recv tensors.
+    # Gather metadata on all ranks to setup recv tensors.
     all_metadata_groups: List[Optional[Dict[torch.dtype, _TBUF_META]]] = [
         None for _ in range(world_size)
     ]
-    torch.distributed.gather_object(
+    torch.distributed.all_gather_object(
+        all_metadata_groups,
         metadata_groups,
-        all_metadata_groups if rank == 0 else None,
-        dst=0,
         group=group,
     )
 
@@ -334,8 +330,8 @@ def gather_pipeline_parallel_tensor_dicts(
     return output_tensor_dict
 
 
-def pipeline_sync(obj_to_sync, fmps: _ParallelStateAPI):
-    raise NotImplementedError
+def _pipeline_sync(tensor_dict: Dict[str, Tensor], fmps: _ParallelStateAPI):
+    gather_pipeline_parallel_tensor_dicts(tensor_dict, fmps)
 
 
 class SaveContext:
@@ -346,65 +342,13 @@ class SaveContext:
     ):
         self.strategy = strategy
         self.fmps = fmps
+        self.cached_tensors = {}
 
-    def save(self, *tensors: Tensor):
-        for t in tensors:
-            assert isinstance(t, Tensor), (
-                "The `save` function should only be used on tensor instances. ",
-                "Non-tensor data can be saved using `save_ctx.data = item.",
-            )
+    def save(self, name: str, tensor: Tensor):
+        self.cached_tensors[name] = tensor
 
-        # Don't cache tensors depending on strategy.
-        # dp_rank = self.fmps.get_data_parallel_rank()
-        # pp_rank = self.fmps.get_pipeline_parallel_rank()
-        # tp_rank = self.fmps.get_tensor_parallel_rank()
-
-        # Check if this rank should actually cache tensors.
-        do_cache_tensors = True
-        if self.strategy != SaveCtxStrategy.REPLICATE_ALL:
-            if self.strategy == SaveCtxStrategy.REPLICATE_PP:
-                raise NotImplementedError(
-                    "Passing save context along pipeline ranks is not "
-                    "implemented."
-                )
-
-        # Cache tensors if necessary.
-        if do_cache_tensors is True:
-            self.cached_tensors = tensors
-
-    def get_cached_tensors(self):
-        return self.cached_tensors
+    def get_tensor(self, name: str) -> Tensor:
+        return self.cached_tensors[name]
 
     def sync(self):
-        # Check if we need to sync
-        do_sync = False
-        if self.strategy == SaveCtxStrategy.REPLICATE_ALL:
-            do_sync = True
-
-        # Sync if necessary.
-        if do_sync is True:
-            pipeline_sync(self._modules, self.fmps)
-        do_sync = False
-
-
-class TrainableModules(nn.ModuleDict):
-    def __init__(
-        self,
-        fmps: _ParallelStateAPI,
-        *args,
-        strategy: TrainableModulesStrategy = TrainableModulesStrategy.REPLICATE_ALL,
-        **kwargs,
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self.strategy = strategy
-        self.fmps = fmps
-
-    def sync(self):
-        # Check if we need to sync
-        do_sync = False
-        if self.strategy == TrainableModulesStrategy.REPLICATE_ALL:
-            do_sync = True
-
-        # Sync if necessary.
-        if do_sync is True:
-            pipeline_sync(self._modules, self.fmps)
+        _pipeline_sync(self.cached_tensors, self.fmps)

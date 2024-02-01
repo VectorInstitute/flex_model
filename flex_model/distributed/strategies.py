@@ -1,4 +1,3 @@
-from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 from torch import Tensor
@@ -280,27 +279,3 @@ class NonValidatedFunctionStrategy(BaseFunctionStrategy):
             return cls(user_func)
         else:
             raise Exception("Provided editing function is not valid")
-
-
-class SaveCtxStrategy(Enum):
-    """
-    Defines a strategy which handles allocating `save_ctx` data. Default
-    stratgy is to simply replicate all `save_ctx` across all workers.
-    """
-
-    REPLICATE_ALL = 1
-    REPLICATE_DP = 2
-    REPLICATE_PP = 3
-    REPLICATE_TP = 4
-
-
-class TrainableModulesStrategy(Enum):
-    """
-    Defines a strategy which handles allocating `trainable_modules`.
-    Default stratgy is to simply replicate across all workers.
-    """
-
-    REPLICATE_ALL = 1
-    REPLICATE_DP = 2
-    REPLICATE_PP = 3
-    REPLICATE_TP = 4
