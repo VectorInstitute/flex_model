@@ -3,14 +3,17 @@ import logging
 
 import torch
 from torch import Tensor
+import torch.distributed as dist
 
 from flex_model.distributed.distributed_state import _ParallelStateAPI
-from flex_model.distributed.mappings import _log_shape
-from flex_model.distributed.stratgies import (
-    SaveCtxStrategy,
-)
 
 logger = logging.getLogger(__name__)
+
+
+def _log_shape(rank, fn_name, in_shape, out_shape):
+    logger.debug(
+        f"Local rank{rank} - {fn_name} | Input: {in_shape} -> {out_shape}"
+    )
 
 
 def _group_by_dtype(
@@ -118,7 +121,7 @@ def _broadcast_pipeline_parallel(
 
             logger.debug(
                 f"Rank{rank}: Constructed recv - "
-                f"({tbuf.numel()}) [{src_rank}] -> [{fmps.get_rank()}]"
+                f"({tbuf.numel()}) [{src_rank}] -> [{dist.get_rank()}]"
             )
 
     # Construct send tensors and dst ranks.
@@ -128,7 +131,7 @@ def _broadcast_pipeline_parallel(
             continue
 
         # Send dst always rank0.
-        for r in fmps.get_world_size():
+        for r in range(fmps.get_pipeline_parallel_world_size()):
             send_tbuf_groups[dtype].append(tbuf)
             send_rank_groups[dtype].append(r)
 
@@ -169,32 +172,29 @@ def _broadcast_pipeline_parallel(
 
     # Unshard each tbuf into individual tensors.
     output_tensor_dict: Dict[str, Tensor] = {}
-    if rank == 0:
 
-        def _reshard_tbuf(meta, tbuf):
-            for name, (start, end) in meta["name_to_index_map"].items():
-                shape = meta["name_to_shape_map"][name]
-                output_tensor_dict[name] = tbuf[start:end].reshape(shape)
+    def _reshard_tbuf(meta, tbuf):
+        for name, (start, end) in meta["name_to_index_map"].items():
+            shape = meta["name_to_shape_map"][name]
+            output_tensor_dict[name] = tbuf[start:end].reshape(shape)
 
-        # Add rank0 local tbufs.
-        for dtype, tbuf in tbuf_groups.items():
-            meta = all_metadata_groups[0][dtype]
-            if meta is not None:
-                _reshard_tbuf(meta, tbuf)
+    # Add rank0 local tbufs.
+    for dtype, tbuf in tbuf_groups.items():
+        meta = all_metadata_groups[0][dtype]
+        if meta is not None:
+            _reshard_tbuf(meta, tbuf)
 
-        # Add gathered tbufs.
-        for recv_tbuf, recv_r in zip(all_recv_tbufs, all_recv_ranks):
-            dtype = recv_tbuf.dtype
-            meta = all_metadata_groups[recv_r][dtype]
+    # Add gathered tbufs.
+    for recv_tbuf, recv_r in zip(all_recv_tbufs, all_recv_ranks):
+        dtype = recv_tbuf.dtype
+        meta = all_metadata_groups[recv_r][dtype]
 
-            buf_rank = meta["buffer_rank"]
-            buf_dtype = meta["buffer_dtype"]
-            assert (
-                buf_dtype == dtype
-            ), f"Dtype mismatch: {buf_dtype} and {dtype}"
-            assert buf_rank == recv_r, f"Rank mismatch: {buf_rank} and {recv_r}"
+        buf_rank = meta["buffer_rank"]
+        buf_dtype = meta["buffer_dtype"]
+        assert buf_dtype == dtype, f"Dtype mismatch: {buf_dtype} and {dtype}"
+        assert buf_rank == recv_r, f"Rank mismatch: {buf_rank} and {recv_r}"
 
-            _reshard_tbuf(meta, recv_tbuf)
+        _reshard_tbuf(meta, recv_tbuf)
 
     return output_tensor_dict
 
@@ -269,7 +269,7 @@ def batch_isend_irecv_pipeline_parallel(
     torch.cuda.synchronize()
 
 
-def gather_pipeline_parallel_tensor_dicts(
+def sync_pipeline_parallel(
     fmps: _ParallelStateAPI,
     tensor_dict: Dict[str, Tensor],
 ) -> Dict[str, Tensor]:
@@ -330,17 +330,25 @@ def gather_pipeline_parallel_tensor_dicts(
     return output_tensor_dict
 
 
-def _pipeline_sync(tensor_dict: Dict[str, Tensor], fmps: _ParallelStateAPI):
-    gather_pipeline_parallel_tensor_dicts(tensor_dict, fmps)
+def sync_tensor_parallel(
+    fmps: _ParallelStateAPI,
+    tensor_dict: Dict[str, Tensor],
+) -> Dict[str, Tensor]:
+    pass
+
+
+def sync_data_parallel(
+    fmps: _ParallelStateAPI,
+    tensor_dict: Dict[str, Tensor],
+) -> Dict[str, Tensor]:
+    pass
 
 
 class SaveContext:
     def __init__(
         self,
         fmps: _ParallelStateAPI,
-        strategy: SaveCtxStrategy = SaveCtxStrategy.REPLICATE_ALL,
     ):
-        self.strategy = strategy
         self.fmps = fmps
         self.cached_tensors = {}
 
@@ -351,4 +359,4 @@ class SaveContext:
         return self.cached_tensors[name]
 
     def sync(self):
-        _pipeline_sync(self.cached_tensors, self.fmps)
+        sync_pipeline_parallel(self.cached_tensors, self.fmps)

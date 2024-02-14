@@ -24,3 +24,7 @@ from .strategies import (
     BaseFunctionStrategy,
     NonValidatedFunctionStrategy,
 )
+from .cached_state import (
+    sync_pipeline_parallel,
+    SaveContext,
+)
