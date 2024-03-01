@@ -15,20 +15,17 @@ for model surgery and introspection.
 
    intro
    examples
+   demos
+
+Check-out our examples for single and multi-gpu, which use both megatron-style
+layers and PyTorch's FSDP wrapper. Additionally, we have a demo which includes
+code for induction head identification in Llama-2-70b.
 
 
 .. toctree::
    :maxdepth: 1
-   :caption: Python API:
+   :caption: Key Python API:
 
    flex_model.core
    flex_model.distributed
    flex_model.traverse
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`

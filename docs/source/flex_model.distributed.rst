@@ -1,18 +1,7 @@
-flex\_model.distributed package
-===============================
+Distributed: Backend, mappings and strategies
+=============================================
 
 .. currentmodule:: flex_model.distributed
-
-
-Backends
---------
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    GPUDeviceMesh
-    TorchDistributedBackend
 
 
 Distributed API
@@ -22,9 +11,7 @@ Distributed API
     :toctree: generated
     :nosignatures:
 
-    initialize_distributed_backend
-    distributed_backend_is_initialized
-    destroy_distributed_backend
+    initialize_distributed_state
 
 
 Mappings
@@ -34,22 +21,29 @@ Mappings
     :toctree: generated
     :nosignatures:
 
-    unity
     broadcast_tensor_parallel
     broadcast_data_parallel
     all_gather_tensor_parallel
     all_gather_data_parallel
     scatter_tensor_parallel
     scatter_data_parallel
-    gather_pipeline_parallel
+    gather_pipeline_parallel_tensor_dicts
 
 
-Parsers
--------
+Strategies
+----------
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
-    parse_collect_from_parameter_tensor
-    parse_collect_and_distribute_from_tensor
+    BaseRoutingStrategy
+    ParameterTensorParallelRoutingStrategy
+    ActivationTensorAllToAllRoutingStrategy
+    BaseOffloadStrategy
+    NullMemoryOffloadStrategy
+    CPUPinnedMemoryOffloadStrategy
+    CPUPagedMemoryOffloadStrategy
+    GPUMemoryOffloadStrategy
+    BaseFunctionStrategy
+    NonValidatedFunctionStrategy

@@ -1,5 +1,5 @@
-flex\_model.traverse package
-============================
+Traverse: Pytree traversal utility
+==================================
 
 .. currentmodule:: flex_model.traverse
 
