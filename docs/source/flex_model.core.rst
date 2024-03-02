@@ -1,11 +1,18 @@
-flex\_model.core
-========================
+Core: Wrapper and HookFunction
+==============================
 
 .. currentmodule:: flex_model.core
 
 
 Modules
 -------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    FlexModel
+    HookFunction
 
 .. autoclass:: FlexModel
    :members:
