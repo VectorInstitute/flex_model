@@ -55,9 +55,11 @@ class TestNetwork(nn.Module):
                         RowParallelLinear(
                             model_dim,
                             model_dim,
-                            input_is_parallel=True,
                             config=config,
                             init_method=init_method,
+                            bias=False,
+                            input_is_parallel=True,
+                            skip_bias_add=False,
                         ),
                     )
                     for _ in range(self.n_layers // 2)
