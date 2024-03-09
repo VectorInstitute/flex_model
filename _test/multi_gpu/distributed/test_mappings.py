@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 import flex_model.distributed as fm_dist
+from flex_model.distributed import sync_pipeline_parallel
 from _test.multi_gpu.registry import SlurmJobResourceSpec, make_test_registry
 import _test.multi_gpu.testing_utils as utils
 
@@ -218,4 +219,43 @@ def test_gather_pipeline_parallel_dtypes():
                     result[name],
                     tensor,
                 )
+    utils.print_success("test_gather_pipeline_parallel_dtypes")
+
+
+@register_mappings_test
+def test_pipeline_sync():
+    utils.init_process_group()
+
+    model = nn.Linear(2, 4)
+    fmps = fm_dist.initialize_distributed_state(model, 1, _NUM_GPUS, 1)
+
+    rank = fmps.get_pipeline_parallel_rank()
+    world_size = fmps.get_pipeline_parallel_world_size()
+
+    tensor_dict = {}
+    tensors_per_rank = 4
+    dtypes = [torch.float32, torch.float16, torch.bfloat16]
+    for dtype in dtypes:
+        for i in range(tensors_per_rank):
+            tensor_idx = rank * tensors_per_rank + i
+            name = f"tensor_{tensor_idx}_{dtype}"
+            tensor = torch.ones((1,), dtype=dtype) * tensor_idx
+            tensor_dict[name] = tensor
+
+    result = sync_pipeline_parallel(fmps, tensor_dict)
+
+    if torch.distributed.get_rank() == 1:
+        breakpoint()
+    torch.distributed.barrier()
+
+    assert len(result) == tensors_per_rank * world_size * len(dtypes)
+    for dtype in dtypes:
+        for i in range(tensors_per_rank):
+            tensor_idx = rank * tensors_per_rank + i
+            name = f"tensor_{tensor_idx}_{dtype}"
+            tensor = torch.ones((1,), dtype=dtype) * tensor_idx
+            assert torch.equal(
+                result[name],
+                tensor,
+            )
     utils.print_success("test_gather_pipeline_parallel_dtypes")
